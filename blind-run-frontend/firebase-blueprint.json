@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the AidRun app, either a blind runner or a volunteer.",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["blind", "volunteer"],
+          "description": "The role of the user."
+        },
+        "name": {
+          "type": "string",
+          "description": "The display name of the user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the user was created."
+        }
+      },
+      "required": ["role", "name", "createdAt"]
+    },
+    "Run": {
+      "title": "Run Request",
+      "description": "A request for a guided run.",
+      "type": "object",
+      "properties": {
+        "blindRunnerId": {
+          "type": "string",
+          "description": "The UID of the blind runner who created the request."
+        },
+        "volunteerId": {
+          "type": "string",
+          "description": "The UID of the volunteer who accepted the request. Null if pending."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "arrived", "running", "completed", "cancelled"],
+          "description": "The current status of the run."
+        },
+        "location": {
+          "type": "string",
+          "description": "The starting location for the run."
+        },
+        "time": {
+          "type": "string",
+          "description": "The scheduled time for the run."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional notes for the volunteer."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the request was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the request was last updated."
+        }
+      },
+      "required": ["blindRunnerId", "status", "location", "time", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Stores user profiles."
+    },
+    "/runs/{runId}": {
+      "schema": {
+        "$ref": "#/entities/Run"
+      },
+      "description": "Stores run requests."
+    }
+  }
+}

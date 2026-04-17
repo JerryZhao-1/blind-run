@@ -1,0 +1,8 @@
+{
+  "name": "AidRun 助盲跑",
+  "description": "一款面向盲人跑者与志愿者的双角色移动产品，在户外跑步场景中建立安全、可预约、可追踪的协助服务闭环。",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}

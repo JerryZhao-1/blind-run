@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=MYSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    database-platform: org.hibernate.dialect.H2Dialect
+  # Redis 配置：由 Testcontainers @DynamicPropertySource 动态注入 host/port
+  data:
+    redis:
+      timeout: 3000ms
+      client-type: jedis
+
+sms:
+  code:
+    length: 6
+    ttl-minutes: 5
+    max-attempts: 5
+
+app:
+  matching:
+    max-distance-km: 10
+    max-candidates: 3
+  websocket:
+    endpoint: /ws/volunteer
+  volunteer:
+    location-ttl-seconds: 30
+  upload:
+    dir: /tmp/blindrun-test-uploads/
