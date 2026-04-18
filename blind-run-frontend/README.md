@@ -16,16 +16,19 @@
 
 1. 安装 Flutter 依赖
    `flutter pub get`
-2. 直接使用 `dart-define` 运行
+2. 复制 `.env.example` 为本地 `.env`，填入 Firebase / Gemini / AMap key
+3. 直接使用 `dart-define` 运行
    `flutter run --dart-define=AMAP_ANDROID_KEY=你的AndroidKey --dart-define=AMAP_IOS_KEY=你的iOSKey --dart-define=AMAP_WEB_KEY=你的WebServiceKey`
-3. 已配置本地 key 后可直接运行
+4. 已配置本地 `.env` 后可直接运行
    `./scripts/flutter_run_with_amap.sh`
 
 ## 高德地图配置
 
 - Android 原生地图/定位 SDK key 优先读取 `--dart-define=AMAP_ANDROID_KEY=...`，若未提供则回退到进程环境变量 `AMAP_ANDROID_KEY`
-- iOS 地图与定位 SDK key 通过 `AMAP_IOS_KEY` 注入
+- iOS 地图与定位 SDK key 通过 `AMAP_IOS_KEY` 注入，`./scripts/flutter_run_with_amap.sh` 会从本地 `.env` 生成 `ios/Flutter/Amap.local.xcconfig`
 - 地点搜索 Web Service key 通过 `AMAP_WEB_KEY` 注入
+- 迁移参考用的 React `src/` 代码通过 `.env` 中的 `VITE_FIREBASE_*` 变量读取 Firebase 配置
+- `GEMINI_API_KEY` 通过 Vite 环境变量注入构建时常量，不再写入仓库文件
 - 未配置 key 时：
   - 志愿者端地图会显示占位提示，不会白屏
   - 盲人端地点搜索会回退到本地演示地点列表
@@ -68,3 +71,4 @@
 - `lib/` 为当前 Flutter 主代码。
 - `android/` 与 `ios/` 为原生工程壳。
 - 原 `src/` React 代码保留为迁移参考，不再作为主运行时入口。
+- 本地敏感配置统一放在未跟踪的 `.env` 与 `ios/Flutter/Amap.local.xcconfig` 中。
