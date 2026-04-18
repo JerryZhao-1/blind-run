@@ -9,6 +9,7 @@ import 'package:aidrun_demo/features/blind/blind_active_run_page.dart';
 import 'package:aidrun_demo/features/volunteer/volunteer_dashboard_page.dart';
 import 'package:aidrun_demo/core/models/user_role.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -245,6 +246,31 @@ void main() {
     );
 
     expect(find.text('测试占位提示'), findsOneWidget);
+  });
+
+  test('amap config load merges runtime configuration from native channel', () async {
+    const channel = MethodChannel('aidrun/device');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'getAMapConfig') {
+            return <String, String>{
+              'androidKey': 'ANDROID123',
+              'iosKey': 'IOS123',
+              'webKey': 'WEB123',
+            };
+          }
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    final config = await AMapConfig.load();
+
+    expect(config.androidKey, 'ANDROID123');
+    expect(config.iosKey, 'IOS123');
+    expect(config.webKey, 'WEB123');
   });
 
   test('blind run stores selected place coordinates', () async {

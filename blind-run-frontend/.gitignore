@@ -30,9 +30,13 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-.env*.local
+.env
+.env.local
+.env.*
+!.env.example
 /build/
 /coverage/
+ios/Flutter/Amap.local.xcconfig
 
 # Symbolication related
 app.*.symbols

@@ -32,9 +32,12 @@ fun decodeFlutterDartDefines(encodedDefines: String?): Map<String, String> {
 
 // Flutter forwards --dart-define values to Gradle as a base64-encoded property.
 val flutterDartDefines = decodeFlutterDartDefines(project.findProperty("dart-defines") as? String)
-val amapAndroidKey =
-    flutterDartDefines["AMAP_ANDROID_KEY"]?.takeIf { it.isNotBlank() }
-        ?: System.getenv("AMAP_ANDROID_KEY").orEmpty()
+fun resolveAmapValue(name: String): String =
+    flutterDartDefines[name]?.takeIf { it.isNotBlank() } ?: System.getenv(name).orEmpty()
+
+val amapAndroidKey = resolveAmapValue("AMAP_ANDROID_KEY")
+val amapIosKey = resolveAmapValue("AMAP_IOS_KEY")
+val amapWebKey = resolveAmapValue("AMAP_WEB_KEY")
 
 android {
     namespace = "com.aidrun.aidrun_demo"
@@ -65,6 +68,8 @@ android {
         versionName = flutter.versionName
         manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKey
         buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKey\"")
+        buildConfigField("String", "AMAP_IOS_KEY", "\"$amapIosKey\"")
+        buildConfigField("String", "AMAP_WEB_KEY", "\"$amapWebKey\"")
     }
 
     buildTypes {

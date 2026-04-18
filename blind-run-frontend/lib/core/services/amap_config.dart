@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:amap_flutter_base/amap_flutter_base.dart';
+import 'package:aidrun_demo/core/services/native_runtime_service.dart';
 import 'package:flutter/foundation.dart';
 
 class AMapConfig {
@@ -18,9 +19,29 @@ class AMapConfig {
     );
   }
 
+  static const empty = AMapConfig(
+    androidKey: '',
+    iosKey: '',
+    webKey: '',
+  );
+
+  static Future<AMapConfig> load() async {
+    final compileTimeConfig = AMapConfig.fromEnvironment();
+    final runtimeValues = await NativeRuntimeService.readAMapConfig();
+    return compileTimeConfig.mergedWith(runtimeValues);
+  }
+
   final String androidKey;
   final String iosKey;
   final String webKey;
+
+  AMapConfig mergedWith(Map<String, String> runtimeValues) {
+    return AMapConfig(
+      androidKey: _firstNonEmpty(runtimeValues['androidKey'], androidKey),
+      iosKey: _firstNonEmpty(runtimeValues['iosKey'], iosKey),
+      webKey: _firstNonEmpty(runtimeValues['webKey'], webKey),
+    );
+  }
 
   bool get hasAndroidKey => androidKey.isNotEmpty;
   bool get hasIosKey => iosKey.isNotEmpty;
@@ -58,4 +79,11 @@ class AMapConfig {
     hasContains: true,
     hasShow: true,
   );
+
+  static String _firstNonEmpty(String? preferred, String fallback) {
+    if (preferred != null && preferred.isNotEmpty) {
+      return preferred;
+    }
+    return fallback;
+  }
 }
