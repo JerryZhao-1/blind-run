@@ -22,6 +22,13 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isAndroidEmulator" -> result.success(isProbablyEmulator())
+                "getAMapConfig" -> result.success(
+                    mapOf(
+                        "androidKey" to BuildConfig.AMAP_ANDROID_KEY,
+                        "iosKey" to BuildConfig.AMAP_IOS_KEY,
+                        "webKey" to BuildConfig.AMAP_WEB_KEY,
+                    ),
+                )
                 else -> result.notImplemented()
             }
         }
