@@ -97,7 +97,7 @@ class _RequestRunPageState extends ConsumerState<RequestRunPage> {
     setState(() => _submitting = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final run = await ref
+      await ref
           .read(appStateControllerProvider.notifier)
           .createBlindRun(RunRequestInput(place: place, timeLabel: _timeLabel));
       await ref
@@ -106,7 +106,7 @@ class _RequestRunPageState extends ConsumerState<RequestRunPage> {
       if (!mounted) {
         return;
       }
-      context.go('/blind/run/${run.id}');
+      context.go('/blind');
     } catch (_) {
       if (!mounted) {
         return;
@@ -117,9 +117,7 @@ class _RequestRunPageState extends ConsumerState<RequestRunPage> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(message)));
     } finally {
       if (mounted) {
         setState(() => _submitting = false);
@@ -189,6 +187,7 @@ class _RequestRunPageState extends ConsumerState<RequestRunPage> {
       body: ListView(
         children: [
           LargeActionButton(
+            key: const Key('blind-request-place-button'),
             onPressed: _selectPlace,
             backgroundColor: AppTheme.yellow,
             foregroundColor: Colors.black,
@@ -312,6 +311,7 @@ class _RequestRunPageState extends ConsumerState<RequestRunPage> {
           ),
           const SizedBox(height: 16),
           BlindAccessibleButton(
+            key: const Key('blind-request-submit-button'),
             onPressed: _selectedPlace != null && !_submitting ? _submit : null,
             enabled: _selectedPlace != null && !_submitting,
             label: _selectedPlace == null ? '确认预约，不可用，请先选择地点' : '确认预约',

@@ -29,7 +29,9 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _refresh();
-      final run = ref.read(appStateControllerProvider.notifier).runById(widget.runId);
+      final run = ref
+          .read(appStateControllerProvider.notifier)
+          .runById(widget.runId);
       if (run == null) {
         return;
       }
@@ -38,7 +40,10 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
           .read(blindAccessibilityServiceProvider)
           .announcePage(_statusAnnouncement(run.status));
     });
-    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refresh());
+    _pollingTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _refresh(),
+    );
   }
 
   @override
@@ -48,8 +53,12 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
   }
 
   Future<void> _refresh() async {
-    await ref.read(appStateControllerProvider.notifier).refreshOrder(widget.runId);
-    await ref.read(appStateControllerProvider.notifier).refreshReview(widget.runId);
+    await ref
+        .read(appStateControllerProvider.notifier)
+        .refreshOrder(widget.runId);
+    await ref
+        .read(appStateControllerProvider.notifier)
+        .refreshReview(widget.runId);
   }
 
   String _statusAnnouncement(RunStatus status) {
@@ -89,6 +98,47 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
     }.contains(status);
   }
 
+  Widget _buildHeader(String title) {
+    return Row(
+      children: [
+        BlindAccessibleButton(
+          key: const Key('blind-active-run-home-button'),
+          onPressed: () => context.go('/blind'),
+          enabled: true,
+          label: '返回盲人主页',
+          hint: '返回主页并查看当前订单状态摘要',
+          child: FilledButton.icon(
+            onPressed: () {},
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.zinc,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            ),
+            icon: const Icon(Icons.arrow_back),
+            label: const Text(
+              '返回主页',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Semantics(
+            header: true,
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: AppTheme.yellow,
+                fontSize: 30,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appStateControllerProvider);
@@ -125,17 +175,7 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
     if (run.status == RunStatus.completed && run.blindRating == null) {
       return BlindPageScaffold(
         aiButtonKey: const Key('blind-ai-assistant-button'),
-        header: Semantics(
-          header: true,
-          child: const Text(
-            '行程已结束',
-            style: TextStyle(
-              color: AppTheme.yellow,
-              fontSize: 30,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
+        header: _buildHeader('行程已结束'),
         body: ListView(
           children: [
             Semantics(
@@ -198,18 +238,21 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
       );
     }
 
-    final hasVolunteerPhone =
-        (run.volunteerPhone ?? run.volunteer?.phone ?? '').trim().isNotEmpty;
+    final hasVolunteerPhone = (run.volunteerPhone ?? run.volunteer?.phone ?? '')
+        .trim()
+        .isNotEmpty;
     final volunteerDisplayPhone =
         run.volunteerPhone ?? run.volunteer?.phone ?? '暂未分配';
 
     return BlindPageScaffold(
       aiButtonKey: const Key('blind-ai-assistant-button'),
+      header: _buildHeader('当前订单'),
       body: ListView(
         children: [
           Semantics(
             container: true,
-            label: '当前行程状态${run.status.blindLabel}。${_statusSupportText(run.status)}。',
+            label:
+                '当前行程状态${run.status.blindLabel}。${_statusSupportText(run.status)}。',
             child: SectionCard(
               color: AppTheme.zinc,
               child: Column(

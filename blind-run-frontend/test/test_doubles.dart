@@ -44,11 +44,14 @@ class FakeAuthSessionStore implements AuthSessionStore {
 }
 
 class FakeAuthRepository implements AuthRepository {
-  FakeAuthRepository({
-    required this.currentUser,
-    AuthSession? verifySession,
-  }) : verifySession = verifySession ??
-            AuthSession(token: 'token', userId: currentUser.userId, role: currentUser.role);
+  FakeAuthRepository({required this.currentUser, AuthSession? verifySession})
+    : verifySession =
+          verifySession ??
+          AuthSession(
+            token: 'token',
+            userId: currentUser.userId,
+            role: currentUser.role,
+          );
 
   CurrentUser currentUser;
   AuthSession verifySession;
@@ -75,7 +78,8 @@ class FakeAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AuthSession> verifyCode(String phone, String code) async => verifySession;
+  Future<AuthSession> verifyCode(String phone, String code) async =>
+      verifySession;
 }
 
 class FakeSettingsRepository implements SettingsRepository {
@@ -109,7 +113,7 @@ class FakeBlindProfileRepository implements BlindProfileRepository {
 
 class FakeEmergencyContactRepository implements EmergencyContactRepository {
   FakeEmergencyContactRepository([List<EmergencyContact>? contacts])
-      : contacts = contacts ?? <EmergencyContact>[];
+    : contacts = contacts ?? <EmergencyContact>[];
 
   final List<EmergencyContact> contacts;
 
@@ -226,15 +230,16 @@ class FakeOrderRepository implements OrderRepository {
     List<Run>? blindRuns,
     List<Run>? availableRuns,
     List<Run>? volunteerRuns,
-  })  : blindRuns = blindRuns ?? <Run>[],
-        availableRuns = availableRuns ?? <Run>[],
-        volunteerRuns = volunteerRuns ?? <Run>[];
+  }) : blindRuns = blindRuns ?? <Run>[],
+       availableRuns = availableRuns ?? <Run>[],
+       volunteerRuns = volunteerRuns ?? <Run>[];
 
   final List<Run> blindRuns;
   final List<Run> availableRuns;
   final List<Run> volunteerRuns;
   final Map<String, OrderReview> reviews = <String, OrderReview>{};
   int createOrderCalls = 0;
+  int listMyOrdersCalls = 0;
 
   @override
   Future<void> acceptOrder(String orderId) async {
@@ -272,7 +277,11 @@ class FakeOrderRepository implements OrderRepository {
   }
 
   @override
-  Future<void> createReview(String orderId, int rating, {String comment = ''}) async {
+  Future<void> createReview(
+    String orderId,
+    int rating, {
+    String comment = '',
+  }) async {
     reviews[orderId] = OrderReview(
       orderId: int.parse(orderId),
       rating: rating,
@@ -299,10 +308,12 @@ class FakeOrderRepository implements OrderRepository {
   Future<OrderReview?> getReview(String orderId) async => reviews[orderId];
 
   @override
-  Future<List<Run>> listAvailableOrders() async => List<Run>.from(availableRuns);
+  Future<List<Run>> listAvailableOrders() async =>
+      List<Run>.from(availableRuns);
 
   @override
   Future<List<Run>> listMyOrders(UserRole role) async {
+    listMyOrdersCalls += 1;
     if (role == UserRole.blind) {
       return List<Run>.from(blindRuns);
     }
@@ -324,13 +335,19 @@ class FakeOrderRepository implements OrderRepository {
     if (index == -1) {
       return;
     }
-    source[index] = source[index].copyWith(status: status, updatedAt: DateTime.now());
+    source[index] = source[index].copyWith(
+      status: status,
+      updatedAt: DateTime.now(),
+    );
   }
 }
 
 class FakeLocationService implements AppLocationService {
   const FakeLocationService([
-    this.location = const DeviceLocation(latitude: 39.9042, longitude: 116.4074),
+    this.location = const DeviceLocation(
+      latitude: 39.9042,
+      longitude: 116.4074,
+    ),
   ]);
 
   final DeviceLocation? location;
