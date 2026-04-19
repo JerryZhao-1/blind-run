@@ -117,9 +117,21 @@
     if (!manager) {
         return;
     }
+    NSLog(@"[AMapFlutterLocationPlugin] startLocation pluginKey=%@ once=%d needAddress=%d servicesEnabled=%d authStatus=%d sinkReady=%d",
+          manager.pluginKey,
+          manager.onceLocation,
+          manager.locatingWithReGeocode,
+          [CLLocationManager locationServicesEnabled],
+          [CLLocationManager authorizationStatus],
+          [AMapFlutterStreamManager sharedInstance].streamHandler.eventSink != nil);
 
     if (manager.onceLocation) {
         [manager requestLocationWithReGeocode:manager.locatingWithReGeocode completionBlock:^(CLLocation *location, AMapLocationReGeocode *regeocode, NSError *error) {
+            NSLog(@"[AMapFlutterLocationPlugin] one-shot completion pluginKey=%@ location=%@ reGeocode=%@ error=%@",
+                  manager.pluginKey,
+                  location,
+                  regeocode,
+                  error);
             [self handlePlugin:manager.pluginKey location:location reGeocode:regeocode error:error];
         }];
     } else {
@@ -236,7 +248,7 @@
 
 - (void)handlePlugin:(NSString *)pluginKey location:(CLLocation *)location reGeocode:(AMapLocationReGeocode *)reGeocode error:(NSError *)error
 {
-    if (!pluginKey || ![[AMapFlutterStreamManager sharedInstance] streamHandler].eventSink) {
+    if (!pluginKey) {
         return;
     }
     NSMutableDictionary *dic = [NSMutableDictionary dictionaryWithCapacity:1];
@@ -305,9 +317,12 @@
         [dic setObject:[NSNumber numberWithInteger:error.code]  forKey:@"errorCode"];
         [dic setObject:error.description forKey:@"errorInfo"];
     }
-    
-    [[AMapFlutterStreamManager sharedInstance] streamHandler].eventSink(dic);
-    //NSLog(@"x===%f,y===%f",location.coordinate.latitude,location.coordinate.longitude);
+
+    NSLog(@"[AMapFlutterLocationPlugin] handlePlugin pluginKey=%@ sinkReady=%d payload=%@",
+          pluginKey,
+          [AMapFlutterStreamManager sharedInstance].streamHandler.eventSink != nil,
+          dic);
+    [[[AMapFlutterStreamManager sharedInstance] streamHandler] emitOrBufferEvent:dic];
 }
 
 - (AMapFlutterLocationManager *)locManagerWithCall:(FlutterMethodCall*)call {
@@ -401,6 +416,9 @@
  */
 - (void)amapLocationManager:(AMapLocationManager *)manager didFailWithError:(NSError *)error
 {
+    NSLog(@"[AMapFlutterLocationPlugin] delegate didFailWithError pluginKey=%@ error=%@",
+          ((AMapFlutterLocationManager *)manager).pluginKey,
+          error);
     [self handlePlugin:((AMapFlutterLocationManager *)manager).pluginKey location:nil reGeocode:nil error:error];
 }
 
@@ -413,6 +431,10 @@
  */
 - (void)amapLocationManager:(AMapLocationManager *)manager didUpdateLocation:(CLLocation *)location reGeocode:(AMapLocationReGeocode *)reGeocode
 {
+    NSLog(@"[AMapFlutterLocationPlugin] delegate didUpdateLocation pluginKey=%@ location=%@ reGeocode=%@",
+          ((AMapFlutterLocationManager *)manager).pluginKey,
+          location,
+          reGeocode);
     [self handlePlugin:((AMapFlutterLocationManager *)manager).pluginKey location:location reGeocode:reGeocode error:nil];
 }
 

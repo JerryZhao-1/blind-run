@@ -18,6 +18,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface AMapFlutterStreamHandler : NSObject<FlutterStreamHandler>
 @property (nonatomic, strong,nullable) FlutterEventSink eventSink;
+@property (nonatomic, strong) NSMutableArray<NSDictionary *> *pendingEvents;
+
+- (void)emitOrBufferEvent:(NSDictionary *)event;
 
 @end
 NS_ASSUME_NONNULL_END

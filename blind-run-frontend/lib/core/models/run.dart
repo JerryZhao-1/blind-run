@@ -23,6 +23,7 @@ class Run {
     this.plannedEnd,
     this.volunteerPhone,
     this.blindUserPhone,
+    this.volunteerOwnershipConfirmed = false,
   });
 
   final String id;
@@ -44,6 +45,7 @@ class Run {
   final DateTime? plannedEnd;
   final String? volunteerPhone;
   final String? blindUserPhone;
+  final bool volunteerOwnershipConfirmed;
 
   Run copyWith({
     String? id,
@@ -67,6 +69,7 @@ class Run {
     DateTime? plannedEnd,
     String? volunteerPhone,
     String? blindUserPhone,
+    bool? volunteerOwnershipConfirmed,
   }) {
     return Run(
       id: id ?? this.id,
@@ -88,7 +91,41 @@ class Run {
       plannedEnd: plannedEnd ?? this.plannedEnd,
       volunteerPhone: volunteerPhone ?? this.volunteerPhone,
       blindUserPhone: blindUserPhone ?? this.blindUserPhone,
+      volunteerOwnershipConfirmed:
+          volunteerOwnershipConfirmed ?? this.volunteerOwnershipConfirmed,
     );
+  }
+
+  Run mergedWith(Run fallback) {
+    return copyWith(
+      location: location.isNotEmpty ? location : fallback.location,
+      timeLabel: timeLabel.isNotEmpty ? timeLabel : fallback.timeLabel,
+      notes: notes.isNotEmpty ? notes : fallback.notes,
+      address: address.isNotEmpty ? address : fallback.address,
+      volunteer: volunteer ?? fallback.volunteer,
+      blindRating: blindRating ?? fallback.blindRating,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      latitude: latitude ?? fallback.latitude,
+      longitude: longitude ?? fallback.longitude,
+      distanceKm: distanceKm ?? fallback.distanceKm,
+      durationMinutes: durationMinutes ?? fallback.durationMinutes,
+      plannedStart: plannedStart ?? fallback.plannedStart,
+      plannedEnd: plannedEnd ?? fallback.plannedEnd,
+      volunteerPhone: _preferNonEmpty(volunteerPhone, fallback.volunteerPhone),
+      blindUserPhone: _preferNonEmpty(blindUserPhone, fallback.blindUserPhone),
+      volunteerOwnershipConfirmed:
+          volunteerOwnershipConfirmed || fallback.volunteerOwnershipConfirmed,
+    );
+  }
+
+  bool get hasPickupCoordinates => latitude != null && longitude != null;
+
+  String? _preferNonEmpty(String? primary, String? secondary) {
+    if (primary != null && primary.trim().isNotEmpty) {
+      return primary;
+    }
+    return secondary;
   }
 
   static String formatTimeLabel(DateTime? start, DateTime? end) {

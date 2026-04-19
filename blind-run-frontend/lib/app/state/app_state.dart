@@ -6,6 +6,7 @@ import 'package:aidrun_demo/core/models/emergency_contact.dart';
 import 'package:aidrun_demo/core/models/reward_item.dart';
 import 'package:aidrun_demo/core/models/run.dart';
 import 'package:aidrun_demo/core/models/user_role.dart';
+import 'package:aidrun_demo/core/models/volunteer_intake_readiness.dart';
 import 'package:aidrun_demo/core/models/volunteer_profile.dart';
 import 'package:aidrun_demo/core/models/app_settings.dart';
 
@@ -18,6 +19,7 @@ class AppState {
     required this.blindRuns,
     required this.volunteerAvailableRuns,
     required this.volunteerMyRuns,
+    required this.volunteerIntakeReadiness,
     this.session,
     this.currentUser,
     this.role,
@@ -41,6 +43,7 @@ class AppState {
       blindRuns: const [],
       volunteerAvailableRuns: const [],
       volunteerMyRuns: const [],
+      volunteerIntakeReadiness: VolunteerIntakeReadiness.offline,
     );
   }
 
@@ -54,6 +57,7 @@ class AppState {
   final List<Run> blindRuns;
   final List<Run> volunteerAvailableRuns;
   final List<Run> volunteerMyRuns;
+  final VolunteerIntakeReadiness volunteerIntakeReadiness;
   final BlindProfile? blindProfile;
   final VolunteerProfile? volunteerProfile;
   final List<EmergencyContact> emergencyContacts;
@@ -77,6 +81,7 @@ class AppState {
     List<Run>? blindRuns,
     List<Run>? volunteerAvailableRuns,
     List<Run>? volunteerMyRuns,
+    VolunteerIntakeReadiness? volunteerIntakeReadiness,
     BlindProfile? blindProfile,
     bool clearBlindProfile = false,
     VolunteerProfile? volunteerProfile,
@@ -99,6 +104,8 @@ class AppState {
       volunteerAvailableRuns:
           volunteerAvailableRuns ?? this.volunteerAvailableRuns,
       volunteerMyRuns: volunteerMyRuns ?? this.volunteerMyRuns,
+      volunteerIntakeReadiness:
+          volunteerIntakeReadiness ?? this.volunteerIntakeReadiness,
       blindProfile:
           clearBlindProfile ? null : (blindProfile ?? this.blindProfile),
       volunteerProfile: clearVolunteerProfile

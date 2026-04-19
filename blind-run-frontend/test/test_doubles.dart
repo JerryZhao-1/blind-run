@@ -176,17 +176,22 @@ class FakeEmergencyContactRepository implements EmergencyContactRepository {
 }
 
 class FakeVolunteerProfileRepository implements VolunteerProfileRepository {
-  FakeVolunteerProfileRepository([
+  FakeVolunteerProfileRepository({
     this.profile = const VolunteerProfile(
       id: 'volunteer-1',
       name: '爱心志愿者',
       verificationStatus: 'APPROVED',
       availableTimeSlots: [],
     ),
-  ]);
+    this.locationError,
+    List<Exception?>? locationErrors,
+  }) : locationErrors = locationErrors ?? const [];
 
   VolunteerProfile profile;
+  final Exception? locationError;
+  final List<Exception?> locationErrors;
   final List<LocationUpdateCall> locationCalls = <LocationUpdateCall>[];
+  int _locationAttempts = 0;
 
   @override
   Future<VolunteerProfile> getProfile() async => profile;
@@ -197,6 +202,13 @@ class FakeVolunteerProfileRepository implements VolunteerProfileRepository {
     required double longitude,
     required bool isOnline,
   }) async {
+    final attemptError = _locationAttempts < locationErrors.length
+        ? locationErrors[_locationAttempts]
+        : locationError;
+    _locationAttempts += 1;
+    if (attemptError != null) {
+      throw attemptError;
+    }
     locationCalls.add(
       LocationUpdateCall(
         latitude: latitude,
@@ -230,6 +242,10 @@ class FakeOrderRepository implements OrderRepository {
     List<Run>? blindRuns,
     List<Run>? availableRuns,
     List<Run>? volunteerRuns,
+    this.acceptError,
+    this.getOrderError,
+    this.acceptedVolunteerStatus = RunStatus.inProgress,
+    this.stripVolunteerContextOnOwnedReads = false,
   }) : blindRuns = blindRuns ?? <Run>[],
        availableRuns = availableRuns ?? <Run>[],
        volunteerRuns = volunteerRuns ?? <Run>[];
@@ -237,15 +253,27 @@ class FakeOrderRepository implements OrderRepository {
   final List<Run> blindRuns;
   final List<Run> availableRuns;
   final List<Run> volunteerRuns;
+  final Exception? acceptError;
+  final Exception? getOrderError;
+  final RunStatus acceptedVolunteerStatus;
+  final bool stripVolunteerContextOnOwnedReads;
   final Map<String, OrderReview> reviews = <String, OrderReview>{};
   int createOrderCalls = 0;
   int listMyOrdersCalls = 0;
 
   @override
   Future<void> acceptOrder(String orderId) async {
+    if (acceptError != null) {
+      throw acceptError!;
+    }
     _replaceStatus(availableRuns, orderId, RunStatus.inProgress);
     final run = availableRuns.firstWhere((item) => item.id == orderId);
-    volunteerRuns.add(run.copyWith(status: RunStatus.inProgress));
+    volunteerRuns.add(
+      _stripVolunteerContext(run).copyWith(
+        status: acceptedVolunteerStatus,
+        volunteerOwnershipConfirmed: true,
+      ),
+    );
     availableRuns.removeWhere((item) => item.id == orderId);
   }
 
@@ -297,6 +325,9 @@ class FakeOrderRepository implements OrderRepository {
 
   @override
   Future<Run> getOrder(String orderId) async {
+    if (getOrderError != null) {
+      throw getOrderError!;
+    }
     return [
       ...blindRuns,
       ...availableRuns,
@@ -340,20 +371,73 @@ class FakeOrderRepository implements OrderRepository {
       updatedAt: DateTime.now(),
     );
   }
+
+  Run _stripVolunteerContext(Run run) {
+    if (!stripVolunteerContextOnOwnedReads) {
+      return run;
+    }
+    return Run(
+      id: run.id,
+      blindRunnerId: run.blindRunnerId,
+      location: run.location,
+      timeLabel: run.timeLabel,
+      status: run.status,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      notes: run.notes,
+      address: run.address,
+      volunteer: run.volunteer,
+      blindRating: run.blindRating,
+      distanceKm: run.distanceKm,
+      durationMinutes: run.durationMinutes,
+      plannedStart: run.plannedStart,
+      plannedEnd: run.plannedEnd,
+      volunteerPhone: run.volunteerPhone,
+    );
+  }
 }
 
 class FakeLocationService implements AppLocationService {
-  const FakeLocationService([
+  const FakeLocationService({
     this.location = const DeviceLocation(
       latitude: 39.9042,
       longitude: 116.4074,
     ),
-  ]);
+    this.failureReason,
+  });
 
   final DeviceLocation? location;
+  final DeviceLocationFailureReason? failureReason;
+
+  @override
+  Future<DeviceLocationLookup> locate() async => DeviceLocationLookup(
+    location: location,
+    failureReason: failureReason,
+  );
 
   @override
   Future<DeviceLocation?> locateOnce() async => location;
+}
+
+class SequencedFakeLocationService implements AppLocationService {
+  SequencedFakeLocationService(this.lookups);
+
+  final List<FutureOr<DeviceLocationLookup>> lookups;
+  int locateCalls = 0;
+
+  @override
+  Future<DeviceLocationLookup> locate() async {
+    final index = locateCalls < lookups.length
+        ? locateCalls
+        : lookups.length - 1;
+    locateCalls += 1;
+    return lookups[index];
+  }
+
+  @override
+  Future<DeviceLocation?> locateOnce() async {
+    return (await locate()).location;
+  }
 }
 
 class FakeSpeechService implements SpeechService {
@@ -436,6 +520,7 @@ Run buildRun({
   double? longitude = 116.4074,
   String? blindUserPhone,
   String? volunteerPhone,
+  bool volunteerOwnershipConfirmed = false,
 }) {
   return Run(
     id: id,
@@ -452,5 +537,6 @@ Run buildRun({
     plannedEnd: DateTime(2026, 4, 19, 20),
     blindUserPhone: blindUserPhone,
     volunteerPhone: volunteerPhone,
+    volunteerOwnershipConfirmed: volunteerOwnershipConfirmed,
   );
 }

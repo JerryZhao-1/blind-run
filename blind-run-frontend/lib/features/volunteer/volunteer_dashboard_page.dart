@@ -5,6 +5,7 @@ import 'package:aidrun_demo/app/state/app_state_controller.dart';
 import 'package:aidrun_demo/core/models/reward_item.dart';
 import 'package:aidrun_demo/core/models/run.dart';
 import 'package:aidrun_demo/core/models/run_status.dart';
+import 'package:aidrun_demo/core/models/volunteer_intake_readiness.dart';
 import 'package:aidrun_demo/core/services/amap_config.dart';
 import 'package:aidrun_demo/core/services/amap_location_service.dart';
 import 'package:aidrun_demo/core/models/volunteer_profile.dart';
@@ -23,10 +24,17 @@ class VolunteerDashboardPage extends ConsumerStatefulWidget {
       _VolunteerDashboardPageState();
 }
 
-class _VolunteerDashboardPageState extends ConsumerState<VolunteerDashboardPage> {
+class _VolunteerDashboardPageState
+    extends ConsumerState<VolunteerDashboardPage> {
   Timer? _refreshTimer;
   Timer? _locationHeartbeatTimer;
   int _tabIndex = 0;
+  String? _lastLocationStatusMessage;
+  String? _lastLocationDebugInfo;
+  DeviceLocation? _latestVolunteerLocation;
+  int _mapCameraMoveRequestKey = 0;
+  bool _hasAutoCenteredMap = false;
+  Future<void>? _ongoingReadinessSync;
   late final AppStateController _controller;
   late final AppLocationService _locationService;
 
@@ -36,12 +44,20 @@ class _VolunteerDashboardPageState extends ConsumerState<VolunteerDashboardPage>
     _controller = ref.read(appStateControllerProvider.notifier);
     _locationService = ref.read(appLocationServiceProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _refreshDashboard();
-      _refreshTimer = Timer.periodic(
-        const Duration(seconds: 10),
-        (_) => _refreshDashboard(),
-      );
-      _startOrStopLocationHeartbeat();
+      await _refreshDashboardResult();
+      _syncAvailabilityState();
+      await _establishVolunteerIntakeReadiness(visibleConnecting: true);
+      _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+        final refreshed = await _refreshDashboardResult();
+        if (!refreshed &&
+            _controller.settings.volunteerAvailable &&
+            _controller.volunteerIntakeReadiness.isReady) {
+          _controller.setVolunteerIntakeReadiness(
+            VolunteerIntakeReadiness.reportFailed,
+          );
+        }
+      });
+      _startOrStopLocationHeartbeat(sendImmediately: false);
     });
   }
 
@@ -53,35 +69,179 @@ class _VolunteerDashboardPageState extends ConsumerState<VolunteerDashboardPage>
     super.dispose();
   }
 
-  Future<void> _refreshDashboard() async {
-    await _controller.refreshVolunteerDashboard();
+  Future<bool> _refreshDashboardResult() async {
+    return _controller.refreshVolunteerDashboard();
   }
 
-  void _startOrStopLocationHeartbeat() {
-    final available = ref.read(appStateControllerProvider).settings.volunteerAvailable;
-    _locationHeartbeatTimer?.cancel();
-    if (!available) {
-      unawaited(_sendOfflineLocation());
+  void _syncAvailabilityState() {
+    if (_controller.settings.volunteerAvailable) {
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.connecting,
+        clearError: true,
+      );
       return;
     }
-    unawaited(_sendOnlineLocation());
-    _locationHeartbeatTimer = Timer.periodic(
-      const Duration(seconds: 15),
-      (_) => _sendOnlineLocation(),
+    _controller.setVolunteerIntakeReadiness(
+      VolunteerIntakeReadiness.offline,
+      clearError: true,
     );
   }
 
-  Future<void> _sendOnlineLocation() async {
-    final location = await _locationService.locateOnce();
-    if (location == null) {
+  Future<void> _establishVolunteerIntakeReadiness({
+    required bool visibleConnecting,
+  }) async {
+    final inFlight = _ongoingReadinessSync;
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final future = _establishVolunteerIntakeReadinessInternal(
+      visibleConnecting: visibleConnecting,
+    );
+    _ongoingReadinessSync = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_ongoingReadinessSync, future)) {
+        _ongoingReadinessSync = null;
+      }
+    }
+  }
+
+  Future<void> _establishVolunteerIntakeReadinessInternal({
+    required bool visibleConnecting,
+  }) async {
+    if (!_controller.settings.volunteerAvailable) {
+      if (mounted) {
+        setState(() {
+          _lastLocationStatusMessage = null;
+          _lastLocationDebugInfo = null;
+          _latestVolunteerLocation = null;
+          _mapCameraMoveRequestKey = 0;
+          _hasAutoCenteredMap = false;
+        });
+      }
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.offline,
+        clearError: true,
+      );
       return;
     }
-    await _controller.reportVolunteerLocation(
-          latitude: location.latitude,
-          longitude: location.longitude,
-          isOnline: true,
-        );
-    await _refreshDashboard();
+    if (visibleConnecting || !_controller.volunteerIntakeReadiness.isReady) {
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.connecting,
+        clearError: true,
+      );
+    }
+    final lookup = await _locationService.locate();
+    if (mounted) {
+      setState(() {
+        _lastLocationStatusMessage = null;
+        _lastLocationDebugInfo = _formatLocationDebugInfo(lookup);
+      });
+    }
+    final location = lookup.location;
+    if (location == null) {
+      final message =
+          lookup.failureReason == DeviceLocationFailureReason.permissionDenied
+          ? '没有定位权限，请在系统设置中允许定位后重试。'
+          : (lookup.errorMessage?.trim().isNotEmpty == true
+                ? lookup.errorMessage!.trim()
+                : '无法获取当前位置，请稍后重试。');
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.locationUnavailable,
+        errorMessage: message,
+      );
+      if (mounted) {
+        setState(() {
+          _lastLocationStatusMessage = message;
+        });
+      }
+      return;
+    }
+    _storeLatestVolunteerLocation(location);
+    final reported = await _controller.reportVolunteerLocation(
+      latitude: location.latitude,
+      longitude: location.longitude,
+      isOnline: true,
+    );
+    if (!reported) {
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.reportFailed,
+      );
+      if (mounted) {
+        setState(() {
+          _lastLocationStatusMessage = ref
+              .read(appStateControllerProvider)
+              .errorMessage;
+        });
+      }
+      return;
+    }
+    _controller.setVolunteerIntakeReadiness(
+      VolunteerIntakeReadiness.onlineReady,
+      clearError: true,
+    );
+    if (mounted) {
+      setState(() {
+        _lastLocationStatusMessage = null;
+      });
+    }
+    final refreshed = await _refreshDashboardResult();
+    if (!refreshed) {
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.reportFailed,
+      );
+      if (mounted) {
+        setState(() {
+          _lastLocationStatusMessage = ref
+              .read(appStateControllerProvider)
+              .errorMessage;
+        });
+      }
+    }
+  }
+
+  void _startOrStopLocationHeartbeat({bool sendImmediately = true}) {
+    final available = ref
+        .read(appStateControllerProvider)
+        .settings
+        .volunteerAvailable;
+    _locationHeartbeatTimer?.cancel();
+    if (!available) {
+      if (mounted) {
+        setState(() {
+          _lastLocationStatusMessage = null;
+          _lastLocationDebugInfo = null;
+          _latestVolunteerLocation = null;
+          _mapCameraMoveRequestKey = 0;
+          _hasAutoCenteredMap = false;
+        });
+      }
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.offline,
+        clearError: true,
+      );
+      unawaited(_sendOfflineLocation());
+      return;
+    }
+    if (sendImmediately) {
+      _controller.setVolunteerIntakeReadiness(
+        VolunteerIntakeReadiness.connecting,
+        clearError: true,
+      );
+      unawaited(_sendOnlineLocation(visibleConnecting: true));
+    }
+    _locationHeartbeatTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _sendOnlineLocation(visibleConnecting: false),
+    );
+  }
+
+  Future<void> _sendOnlineLocation({required bool visibleConnecting}) async {
+    await _establishVolunteerIntakeReadiness(
+      visibleConnecting: visibleConnecting,
+    );
   }
 
   Future<void> _sendOfflineLocation() async {
@@ -89,10 +249,53 @@ class _VolunteerDashboardPageState extends ConsumerState<VolunteerDashboardPage>
     final latitude = location?.latitude ?? 39.9042;
     final longitude = location?.longitude ?? 116.4074;
     await _controller.reportVolunteerLocation(
-          latitude: latitude,
-          longitude: longitude,
-          isOnline: false,
-        );
+      latitude: latitude,
+      longitude: longitude,
+      isOnline: false,
+    );
+  }
+
+  void _storeLatestVolunteerLocation(DeviceLocation location) {
+    final shouldAutoCenter = !_hasAutoCenteredMap;
+    if (!mounted) {
+      _latestVolunteerLocation = location;
+      if (shouldAutoCenter) {
+        _hasAutoCenteredMap = true;
+        _mapCameraMoveRequestKey += 1;
+      }
+      return;
+    }
+    setState(() {
+      _latestVolunteerLocation = location;
+      if (shouldAutoCenter) {
+        _hasAutoCenteredMap = true;
+        _mapCameraMoveRequestKey += 1;
+      }
+    });
+  }
+
+  void _centerMapOnLatestLocation() {
+    if (_latestVolunteerLocation == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _mapCameraMoveRequestKey += 1;
+    });
+  }
+
+  String _formatLocationDebugInfo(DeviceLocationLookup lookup) {
+    final raw = lookup.rawResult;
+    final values = <String>[
+      'failureReason=${lookup.failureReason?.name ?? '-'}',
+      'errorCode=${lookup.errorCode ?? raw?['errorCode'] ?? '-'}',
+      'errorInfo=${lookup.errorMessage ?? raw?['errorInfo'] ?? '-'}',
+      'latitude=${raw?['latitude'] ?? lookup.location?.latitude ?? '-'}',
+      'longitude=${raw?['longitude'] ?? lookup.location?.longitude ?? '-'}',
+    ];
+    if (raw != null && raw.isNotEmpty) {
+      values.add('raw=$raw');
+    }
+    return values.join('\n');
   }
 
   @override
@@ -109,10 +312,16 @@ class _VolunteerDashboardPageState extends ConsumerState<VolunteerDashboardPage>
         controller: controller,
         pendingRuns: pendingRuns,
         activeRun: activeRun,
+        readiness: state.volunteerIntakeReadiness,
+        errorMessage: _lastLocationStatusMessage ?? state.errorMessage,
+        locationDebugInfo: _lastLocationDebugInfo,
+        currentLocation: _latestVolunteerLocation,
+        cameraMoveRequestKey: _mapCameraMoveRequestKey,
         onAvailabilityChanged: (value) {
           controller.updateVolunteerAvailability(value);
           _startOrStopLocationHeartbeat();
         },
+        onCenterOnCurrentLocation: _centerMapOnLatestLocation,
       ),
       _VolunteerHistoryTab(history: volunteerHistoryRuns),
       _VolunteerStoreTab(rewards: state.rewards),
@@ -146,18 +355,31 @@ class _VolunteerMapTab extends StatelessWidget {
     required this.controller,
     required this.pendingRuns,
     required this.activeRun,
+    required this.readiness,
+    required this.errorMessage,
+    required this.locationDebugInfo,
+    required this.currentLocation,
+    required this.cameraMoveRequestKey,
     required this.onAvailabilityChanged,
+    required this.onCenterOnCurrentLocation,
   });
 
   final AMapConfig config;
   final AppStateController controller;
   final List<Run> pendingRuns;
   final Run? activeRun;
+  final VolunteerIntakeReadiness readiness;
+  final String? errorMessage;
+  final String? locationDebugInfo;
+  final DeviceLocation? currentLocation;
+  final int cameraMoveRequestKey;
   final ValueChanged<bool> onAvailabilityChanged;
+  final VoidCallback onCenterOnCurrentLocation;
 
   @override
   Widget build(BuildContext context) {
     final currentActiveRun = activeRun;
+    final latestLocation = currentLocation;
     final points = pendingRuns
         .where((run) => run.latitude != null && run.longitude != null)
         .map(
@@ -169,8 +391,21 @@ class _VolunteerMapTab extends StatelessWidget {
             snippet: run.address.isEmpty ? run.timeLabel : run.address,
           ),
         )
-        .toList();
+        .toList(growable: true);
+    if (latestLocation != null) {
+      points.add(
+        AMapMarkerViewData(
+          id: '__current_location__',
+          latitude: latestLocation.latitude,
+          longitude: latestLocation.longitude,
+          title: '当前位置',
+          snippet: '以当前接单定位为准',
+        ),
+      );
+    }
     final isOnline = controller.settings.volunteerAvailable;
+    final status = _readinessContent(readiness);
+    final emptyState = _emptyStateCopy(readiness);
 
     return Stack(
       children: [
@@ -184,6 +419,12 @@ class _VolunteerMapTab extends StatelessWidget {
               zoom: 11,
               showMyLocation: true,
               markers: points,
+              cameraMoveRequestKey: latestLocation == null
+                  ? null
+                  : cameraMoveRequestKey,
+              cameraMoveLatitude: latestLocation?.latitude,
+              cameraMoveLongitude: latestLocation?.longitude,
+              cameraMoveZoom: 15,
               fallbackMessage: '高德地图未配置完成，当前显示附近需求列表，地图区域已降级。',
             ),
           ),
@@ -196,26 +437,44 @@ class _VolunteerMapTab extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             child: Row(
               children: [
-                Icon(
-                  Icons.circle,
-                  color: isOnline ? AppTheme.emerald : AppTheme.red,
-                  size: 12,
-                ),
+                Icon(Icons.circle, color: status.color, size: 12),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    isOnline ? '在线 - 正在寻找附近需求' : '离线 - 暂停接收新订单',
+                    status.title,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                Switch(
-                  value: isOnline,
-                  onChanged: onAvailabilityChanged,
-                ),
+                Switch(value: isOnline, onChanged: onAvailabilityChanged),
               ],
             ),
           ),
         ),
+        if (latestLocation != null)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 92,
+            right: 16,
+            child: FilledButton.icon(
+              onPressed: onCenterOnCurrentLocation,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+                elevation: 2,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              icon: const Icon(Icons.my_location),
+              label: const Text(
+                '回到当前位置',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
         Align(
           alignment: Alignment.bottomCenter,
           child: Container(
@@ -237,13 +496,36 @@ class _VolunteerMapTab extends StatelessWidget {
                 ),
                 Padding(
                   padding: const EdgeInsets.all(20),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Row(
+                        children: [
+                          Text(
+                            '附近需求 (${pendingRuns.length})',
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       Text(
-                        '附近需求 (${pendingRuns.length})',
+                        status.description,
                         style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
+                          color: Colors.black54,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '地图会在首次定位成功后跳转到当前位置，之后可通过按钮回到当前位置。',
+                        style: TextStyle(
+                          color: Colors.black45,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ],
@@ -255,8 +537,9 @@ class _VolunteerMapTab extends StatelessWidget {
                     children: [
                       if (currentActiveRun != null)
                         GestureDetector(
-                          onTap: () =>
-                              context.go('/volunteer/run/${currentActiveRun.id}'),
+                          onTap: () => context.go(
+                            '/volunteer/run/${currentActiveRun.id}',
+                          ),
                           child: SectionCard(
                             color: Colors.black,
                             child: const Row(
@@ -279,12 +562,73 @@ class _VolunteerMapTab extends StatelessWidget {
                         ),
                       if (currentActiveRun != null) const SizedBox(height: 12),
                       if (pendingRuns.isEmpty)
-                        const SectionCard(
-                          child: Text(
-                            '当前没有可接订单。若你已切换到在线状态，请稍候刷新附近需求。',
-                            style: TextStyle(fontSize: 18),
+                        SectionCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                emptyState,
+                                style: const TextStyle(fontSize: 18),
+                              ),
+                              if (errorMessage != null) ...[
+                                const SizedBox(height: 12),
+                                Text(
+                                  errorMessage!,
+                                  style: const TextStyle(
+                                    color: AppTheme.red,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                              if (locationDebugInfo != null &&
+                                  locationDebugInfo!.trim().isNotEmpty &&
+                                  readiness !=
+                                      VolunteerIntakeReadiness.onlineReady) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF6F6F6),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        '定位诊断',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        locationDebugInfo!,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.black54,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                         ),
+                      if (errorMessage != null && pendingRuns.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          errorMessage!,
+                          style: const TextStyle(
+                            color: AppTheme.red,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                       for (final run in pendingRuns) ...[
                         SectionCard(
                           child: Column(
@@ -304,7 +648,8 @@ class _VolunteerMapTab extends StatelessWidget {
                                   const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           run.location,
@@ -331,7 +676,8 @@ class _VolunteerMapTab extends StatelessWidget {
                                             ),
                                           ),
                                         ],
-                                        if ((run.blindUserPhone ?? '').isNotEmpty) ...[
+                                        if ((run.blindUserPhone ?? '')
+                                            .isNotEmpty) ...[
                                           const SizedBox(height: 6),
                                           Text(
                                             '跑者电话 ${run.blindUserPhone!}',
@@ -353,24 +699,35 @@ class _VolunteerMapTab extends StatelessWidget {
                                   onPressed: currentActiveRun != null
                                       ? null
                                       : () async {
-                                          await controller.acceptRun(run.id);
+                                          final result = await controller.acceptRun(
+                                            run.id,
+                                          );
                                           if (!context.mounted) {
                                             return;
                                           }
-                                          context.go('/volunteer/run/${run.id}');
+                                          if (!result.isConfirmed) {
+                                            return;
+                                          }
+                                          context.go(
+                                            '/volunteer/run/${run.id}',
+                                          );
                                         },
                                   style: FilledButton.styleFrom(
                                     backgroundColor: Colors.black,
                                     foregroundColor: Colors.white,
                                     disabledBackgroundColor: Colors.black12,
                                     disabledForegroundColor: Colors.black38,
-                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                    ),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(18),
                                     ),
                                   ),
                                   child: Text(
-                                    currentActiveRun != null ? '请先完成当前行程' : '立即接单',
+                                    currentActiveRun != null
+                                        ? '请先完成当前行程'
+                                        : '立即接单',
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w800,
@@ -394,6 +751,60 @@ class _VolunteerMapTab extends StatelessWidget {
       ],
     );
   }
+}
+
+class _ReadinessContent {
+  const _ReadinessContent({
+    required this.title,
+    required this.description,
+    required this.color,
+  });
+
+  final String title;
+  final String description;
+  final Color color;
+}
+
+_ReadinessContent _readinessContent(VolunteerIntakeReadiness readiness) {
+  return switch (readiness) {
+    VolunteerIntakeReadiness.offline => const _ReadinessContent(
+      title: '离线 - 暂停接收新订单',
+      description: '你当前未接收新订单，打开开关后应用会尝试定位并建立接单状态。',
+      color: AppTheme.red,
+    ),
+    VolunteerIntakeReadiness.connecting => const _ReadinessContent(
+      title: '准备中 - 正在建立接单状态',
+      description: '正在获取当前位置并同步到后台，完成后才会确认附近订单结果。',
+      color: Colors.orange,
+    ),
+    VolunteerIntakeReadiness.onlineReady => const _ReadinessContent(
+      title: '在线 - 已可接收附近订单',
+      description: '当前位置已同步到后台，附近订单列表现在代表真实可接机会。',
+      color: AppTheme.emerald,
+    ),
+    VolunteerIntakeReadiness.locationUnavailable => const _ReadinessContent(
+      title: '定位失败 - 尚未进入接单状态',
+      description: '需要先成功获取当前位置，才能确认附近可接订单。',
+      color: AppTheme.red,
+    ),
+    VolunteerIntakeReadiness.reportFailed => const _ReadinessContent(
+      title: '同步失败 - 尚未进入接单状态',
+      description: '已尝试定位，但后台未确认当前位置，附近订单结果暂不可信。',
+      color: AppTheme.red,
+    ),
+  };
+}
+
+String _emptyStateCopy(VolunteerIntakeReadiness readiness) {
+  return switch (readiness) {
+    VolunteerIntakeReadiness.offline => '你当前处于离线状态，打开接单开关后才会尝试加载附近订单。',
+    VolunteerIntakeReadiness.connecting => '正在准备接单状态，请稍候，系统完成定位和同步后会刷新附近需求。',
+    VolunteerIntakeReadiness.onlineReady => '当前附近暂无可接订单。请保持在线，有新需求会自动刷新。',
+    VolunteerIntakeReadiness.locationUnavailable =>
+      '暂时无法确认附近订单，因为当前定位未成功。请检查定位权限后重试。',
+    VolunteerIntakeReadiness.reportFailed =>
+      '暂时无法确认附近订单，因为当前位置尚未成功同步到后台。请稍后重试。',
+  };
 }
 
 class _VolunteerHistoryTab extends StatelessWidget {
@@ -507,62 +918,61 @@ class _VolunteerStoreTab extends StatelessWidget {
                 crossAxisSpacing: 16,
                 childAspectRatio: 0.6,
               ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final item = rewards[index];
-                  return SectionCard(
-                    padding: const EdgeInsets.all(10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        AppNetworkImage(
-                          imageUrl: item.imageUrl,
-                          height: 96,
-                          width: double.infinity,
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final item = rewards[index];
+                return SectionCard(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AppNetworkImage(
+                        imageUrl: item.imageUrl,
+                        height: 96,
+                        width: double.infinity,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        item.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          item.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
+                      ),
+                      const Spacer(),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${item.points} 积分',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${item.points} 积分',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: double.infinity,
-                              child: FilledButton(
-                                onPressed: () {},
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.black,
-                                  foregroundColor: Colors.white,
-                                  minimumSize: const Size.fromHeight(36),
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: () {},
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.black,
+                                foregroundColor: Colors.white,
+                                minimumSize: const Size.fromHeight(36),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
                                 ),
-                                child: const Text('兑换'),
                               ),
+                              child: const Text('兑换'),
                             ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                },
-                childCount: rewards.length,
-              ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              }, childCount: rewards.length),
             ),
           ),
         ],
@@ -572,10 +982,7 @@ class _VolunteerStoreTab extends StatelessWidget {
 }
 
 class _VolunteerProfileTab extends StatelessWidget {
-  const _VolunteerProfileTab({
-    required this.controller,
-    required this.profile,
-  });
+  const _VolunteerProfileTab({required this.controller, required this.profile});
 
   final AppStateController controller;
   final VolunteerProfile? profile;
@@ -607,7 +1014,10 @@ class _VolunteerProfileTab extends StatelessWidget {
                 const SizedBox(height: 16),
                 Text(
                   displayName,
-                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -620,7 +1030,8 @@ class _VolunteerProfileTab extends StatelessWidget {
                   children: [
                     _Metric(
                       label: '完成行程',
-                      value: '${controller.volunteerHistoryRuns.where((run) => run.status == RunStatus.completed).length}',
+                      value:
+                          '${controller.volunteerHistoryRuns.where((run) => run.status == RunStatus.completed).length}',
                     ),
                     _Metric(
                       label: '进行中',
@@ -670,10 +1081,7 @@ class _VolunteerProfileTab extends StatelessWidget {
 }
 
 class _Metric extends StatelessWidget {
-  const _Metric({
-    required this.label,
-    required this.value,
-  });
+  const _Metric({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -682,7 +1090,10 @@ class _Metric extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+        ),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(color: Colors.black54)),
       ],

@@ -187,16 +187,38 @@ class _VolunteerActiveRunPageState extends ConsumerState<VolunteerActiveRunPage>
       );
     }
 
-    final supportText = switch (run.status) {
-      RunStatus.inProgress => '请先出发前往集合地点',
-      RunStatus.driverEnRoute => '请尽快到达集合地点',
-      RunStatus.driverArrived => '你已到达，请完成本次陪跑并在结束后结算',
-      RunStatus.pendingAccept => '准备接单',
-      RunStatus.pendingMatch => '订单仍在匹配中',
-      RunStatus.cancelled => '行程已取消',
-      RunStatus.rematching => '订单重新匹配中',
-      RunStatus.noVolunteer => '暂无可用状态',
-      RunStatus.completed => '感谢您的志愿服务',
+    final confirmedOwnership = run.volunteerOwnershipConfirmed;
+    final hasPickupCoordinates = run.hasPickupCoordinates;
+    final hasRunnerPhone =
+        confirmedOwnership && (run.blindUserPhone ?? '').trim().isNotEmpty;
+    final titleText = switch (run.status) {
+      RunStatus.pendingAccept when confirmedOwnership => '接单确认中',
+      _ => confirmedOwnership ? run.status.volunteerLabel : '接单状态待确认',
+    };
+    final supportText = !confirmedOwnership
+        ? (state.errorMessage ?? '正在确认订单归属，请返回附近需求稍后重试。')
+        : switch (run.status) {
+            RunStatus.inProgress => '请先出发前往集合地点',
+            RunStatus.driverEnRoute => '请尽快到达集合地点',
+            RunStatus.driverArrived => '你已到达，请完成本次陪跑并在结束后结算',
+            RunStatus.pendingAccept => '订单已归属给你，等待后台同步下一步状态',
+            RunStatus.pendingMatch => '订单仍在匹配中',
+            RunStatus.cancelled => '行程已取消',
+            RunStatus.rematching => '订单重新匹配中',
+            RunStatus.noVolunteer => '暂无可用状态',
+            RunStatus.completed => '感谢您的志愿服务',
+          };
+    final actionLabel = switch (run.status) {
+      RunStatus.inProgress => '我已出发',
+      RunStatus.driverEnRoute => '我已到达集合点',
+      RunStatus.driverArrived => '结束行程',
+      _ => null,
+    };
+    final actionIcon = switch (run.status) {
+      RunStatus.inProgress => Icons.navigation,
+      RunStatus.driverEnRoute => Icons.place,
+      RunStatus.driverArrived => Icons.flag,
+      _ => null,
     };
 
     return Scaffold(
@@ -204,23 +226,26 @@ class _VolunteerActiveRunPageState extends ConsumerState<VolunteerActiveRunPage>
       body: Stack(
         children: [
           Positioned.fill(
-            child: AMapMapView(
-              config: config,
-              centerLatitude: run.latitude ?? 39.9042,
-              centerLongitude: run.longitude ?? 116.4074,
-              zoom: 13,
-              markers: [
-                if (run.latitude != null && run.longitude != null)
-                  AMapMarkerViewData(
-                    id: run.id,
-                    latitude: run.latitude!,
-                    longitude: run.longitude!,
-                    title: run.location,
-                    snippet: run.address.isEmpty ? run.timeLabel : run.address,
+            child: hasPickupCoordinates
+                ? AMapMapView(
+                    config: config,
+                    centerLatitude: run.latitude!,
+                    centerLongitude: run.longitude!,
+                    zoom: 13,
+                    markers: [
+                      AMapMarkerViewData(
+                        id: run.id,
+                        latitude: run.latitude!,
+                        longitude: run.longitude!,
+                        title: run.location,
+                        snippet: run.address.isEmpty ? run.timeLabel : run.address,
+                      ),
+                    ],
+                    fallbackMessage: '高德地图未配置完成，行程地图已降级为占位状态。',
+                  )
+                : const _VolunteerOrderMapUnavailable(
+                    message: '集合点定位暂不可用',
                   ),
-              ],
-              fallbackMessage: '高德地图未配置完成，行程地图已降级为占位状态。',
-            ),
           ),
           Positioned(
             top: MediaQuery.of(context).padding.top + 16,
@@ -248,7 +273,7 @@ class _VolunteerActiveRunPageState extends ConsumerState<VolunteerActiveRunPage>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    run.status.volunteerLabel,
+                    titleText,
                     style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 8),
@@ -271,7 +296,7 @@ class _VolunteerActiveRunPageState extends ConsumerState<VolunteerActiveRunPage>
                                 ),
                               ),
                             ),
-                            if ((run.blindUserPhone ?? '').isNotEmpty)
+                            if (hasRunnerPhone)
                               Text(
                                 run.blindUserPhone!,
                                 style: const TextStyle(fontWeight: FontWeight.w700),
@@ -295,54 +320,69 @@ class _VolunteerActiveRunPageState extends ConsumerState<VolunteerActiveRunPage>
                       ],
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: () async {
-                        switch (run.status) {
-                          case RunStatus.inProgress:
-                            await controller.markEnRoute(run.id);
-                          case RunStatus.driverEnRoute:
-                            await controller.markArrived(run.id);
-                          case RunStatus.driverArrived:
-                            await controller.finishRun(run.id);
-                          default:
-                            return;
-                        }
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: run.status == RunStatus.driverArrived
-                            ? AppTheme.red
-                            : Colors.black,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 18),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+                  if (actionLabel != null && confirmedOwnership) ...[
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () async {
+                          switch (run.status) {
+                            case RunStatus.inProgress:
+                              await controller.markEnRoute(run.id);
+                            case RunStatus.driverEnRoute:
+                              await controller.markArrived(run.id);
+                            case RunStatus.driverArrived:
+                              await controller.finishRun(run.id);
+                            default:
+                              return;
+                          }
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: run.status == RunStatus.driverArrived
+                              ? AppTheme.red
+                              : Colors.black,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
                         ),
-                      ),
-                      icon: Icon(
-                        switch (run.status) {
-                          RunStatus.inProgress => Icons.navigation,
-                          RunStatus.driverEnRoute => Icons.place,
-                          RunStatus.driverArrived => Icons.flag,
-                          _ => Icons.check,
-                        },
-                      ),
-                      label: Text(
-                        switch (run.status) {
-                          RunStatus.inProgress => '我已出发',
-                          RunStatus.driverEnRoute => '我已到达集合点',
-                          RunStatus.driverArrived => '结束行程',
-                          _ => '返回',
-                        },
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
+                        icon: Icon(actionIcon),
+                        label: Text(
+                          actionLabel,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ),
-                  ),
+                  ],
+                  if (!confirmedOwnership) ...[
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => context.go('/volunteer'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          side: const BorderSide(color: Colors.black26),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        icon: const Icon(Icons.arrow_back),
+                        label: const Text(
+                          '返回附近需求',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                   if (state.errorMessage != null) ...[
                     const SizedBox(height: 12),
                     Text(
@@ -355,6 +395,39 @@ class _VolunteerActiveRunPageState extends ConsumerState<VolunteerActiveRunPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _VolunteerOrderMapUnavailable extends StatelessWidget {
+  const _VolunteerOrderMapUnavailable({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F4F7),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.location_off, size: 40, color: Colors.black45),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: Colors.black54,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

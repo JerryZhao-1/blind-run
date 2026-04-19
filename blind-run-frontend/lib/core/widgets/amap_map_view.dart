@@ -22,7 +22,7 @@ class AMapMarkerViewData {
   final String? snippet;
 }
 
-class AMapMapView extends StatelessWidget {
+class AMapMapView extends StatefulWidget {
   const AMapMapView({
     super.key,
     required this.config,
@@ -31,6 +31,10 @@ class AMapMapView extends StatelessWidget {
     required this.markers,
     this.zoom = 13,
     this.showMyLocation = false,
+    this.cameraMoveRequestKey,
+    this.cameraMoveLatitude,
+    this.cameraMoveLongitude,
+    this.cameraMoveZoom,
     this.onTap,
     this.fallbackMessage,
   });
@@ -41,14 +45,33 @@ class AMapMapView extends StatelessWidget {
   final double zoom;
   final bool showMyLocation;
   final List<AMapMarkerViewData> markers;
+  final int? cameraMoveRequestKey;
+  final double? cameraMoveLatitude;
+  final double? cameraMoveLongitude;
+  final double? cameraMoveZoom;
   final ValueChanged<LatLng>? onTap;
   final String? fallbackMessage;
 
   @override
+  State<AMapMapView> createState() => _AMapMapViewState();
+}
+
+class _AMapMapViewState extends State<AMapMapView> {
+  AMapController? _controller;
+  int? _lastAppliedCameraMoveRequestKey;
+
+  @override
+  void didUpdateWidget(covariant AMapMapView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _moveCameraIfNeeded();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final config = widget.config;
     if (!config.supportsNativeMap) {
       return _MapFallback(
-        message: fallbackMessage ?? '未配置高德地图 Key，当前显示地图占位状态。',
+        message: widget.fallbackMessage ?? '未配置高德地图 Key，当前显示地图占位状态。',
       );
     }
 
@@ -58,13 +81,14 @@ class AMapMapView extends StatelessWidget {
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return _MapFallback(
-              message: fallbackMessage ?? '地图初始化中，请稍候。',
+              message: widget.fallbackMessage ?? '地图初始化中，请稍候。',
             );
           }
           if (snapshot.data == true) {
             return _MapFallback(
               message:
-                  fallbackMessage ?? 'Android 模拟器上的高德原生地图不稳定，当前显示地图占位。请使用真机查看真实地图效果。',
+                  widget.fallbackMessage ??
+                  'Android 模拟器上的高德原生地图不稳定，当前显示地图占位。请使用真机查看真实地图效果。',
             );
           }
           return _buildNativeMap();
@@ -76,26 +100,27 @@ class AMapMapView extends StatelessWidget {
   }
 
   Widget _buildNativeMap() {
-    final mappedMarkers = markers.map((item) {
+    final mappedMarkers = widget.markers.map((item) {
       return Marker(
         position: LatLng(item.latitude, item.longitude),
-        infoWindow: InfoWindow(
-          title: item.title,
-          snippet: item.snippet,
-        ),
+        infoWindow: InfoWindow(title: item.title, snippet: item.snippet),
       );
     }).toSet();
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: AMapWidget(
-        apiKey: config.apiKey,
+        apiKey: widget.config.apiKey,
         privacyStatement: AMapConfig.privacyStatement,
+        onMapCreated: (controller) {
+          _controller = controller;
+          _moveCameraIfNeeded();
+        },
         initialCameraPosition: CameraPosition(
-          target: LatLng(centerLatitude, centerLongitude),
-          zoom: zoom,
+          target: LatLng(widget.centerLatitude, widget.centerLongitude),
+          zoom: widget.zoom,
         ),
-        myLocationStyleOptions: showMyLocation
+        myLocationStyleOptions: widget.showMyLocation
             ? MyLocationStyleOptions(
                 true,
                 circleFillColor: Colors.lightBlue.withAlpha(50),
@@ -104,7 +129,28 @@ class AMapMapView extends StatelessWidget {
               )
             : null,
         markers: mappedMarkers,
-        onTap: onTap,
+        onTap: widget.onTap,
+      ),
+    );
+  }
+
+  void _moveCameraIfNeeded() {
+    final controller = _controller;
+    final requestKey = widget.cameraMoveRequestKey;
+    final latitude = widget.cameraMoveLatitude;
+    final longitude = widget.cameraMoveLongitude;
+    if (controller == null ||
+        requestKey == null ||
+        requestKey == _lastAppliedCameraMoveRequestKey ||
+        latitude == null ||
+        longitude == null) {
+      return;
+    }
+    _lastAppliedCameraMoveRequestKey = requestKey;
+    controller.moveCamera(
+      CameraUpdate.newLatLngZoom(
+        LatLng(latitude, longitude),
+        widget.cameraMoveZoom ?? widget.zoom,
       ),
     );
   }

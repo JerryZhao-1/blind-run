@@ -93,17 +93,23 @@ class HttpOrderRepository implements OrderRepository {
     }
     return content
         .whereType<Map>()
-        .map((item) => _parseOrderDetail(item.cast<String, dynamic>()))
+        .map(
+          (item) => _parseOrderDetail(
+            item.cast<String, dynamic>(),
+            volunteerOwnershipConfirmed: role == UserRole.volunteer,
+          ),
+        )
         .toList(growable: false);
   }
 
   @override
   Future<List<Run>> listAvailableOrders() async {
     final response = await _apiClient.get('/api/orders/available');
-    if (response is! List) {
+    final items = _coerceList(response);
+    if (items == null) {
       return const [];
     }
-    return response
+    return items
         .whereType<Map>()
         .map((item) => _parseAvailableOrder(item.cast<String, dynamic>()))
         .toList(growable: false);
@@ -161,10 +167,14 @@ class HttpOrderRepository implements OrderRepository {
     );
   }
 
-  Run _parseOrderDetail(Map<String, dynamic> json) {
+  Run _parseOrderDetail(
+    Map<String, dynamic> json, {
+    bool volunteerOwnershipConfirmed = false,
+  }) {
     final plannedStart = _parseDateTime(json['plannedStart']);
     final plannedEnd = _parseDateTime(json['plannedEnd']);
     final volunteerPhone = json['volunteerPhone'] as String?;
+    final blindUserPhone = json['blindUserPhone'] as String?;
     return Run(
       id: '${json['orderId'] ?? json['id'] ?? ''}',
       blindRunnerId: '',
@@ -174,12 +184,18 @@ class HttpOrderRepository implements OrderRepository {
       status: RunStatusX.fromBackend(json['status'] as String?) ??
           RunStatus.pendingMatch,
       createdAt: _parseDateTime(json['createdAt']) ?? DateTime.now(),
-      updatedAt: _parseDateTime(json['acceptedAt']) ??
+      updatedAt: _parseDateTime(json['updatedAt']) ??
+          _parseDateTime(json['acceptedAt']) ??
           _parseDateTime(json['createdAt']) ??
           DateTime.now(),
+      notes: json['notes'] as String? ?? '',
       plannedStart: plannedStart,
       plannedEnd: plannedEnd,
+      latitude: _readDouble(json['startLatitude']),
+      longitude: _readDouble(json['startLongitude']),
       volunteerPhone: volunteerPhone,
+      blindUserPhone: blindUserPhone,
+      volunteerOwnershipConfirmed: volunteerOwnershipConfirmed,
       volunteer: volunteerPhone == null || volunteerPhone.isEmpty
           ? null
           : VolunteerProfile(
@@ -211,6 +227,24 @@ class HttpOrderRepository implements OrderRepository {
       latitude: _readDouble(json['startLatitude']),
       longitude: _readDouble(json['startLongitude']),
     );
+  }
+
+  List<dynamic>? _coerceList(dynamic response) {
+    if (response is List) {
+      return response;
+    }
+    if (response is! Map<String, dynamic>) {
+      return null;
+    }
+    final data = response['data'];
+    if (data is List) {
+      return data;
+    }
+    final content = response['content'];
+    if (content is List) {
+      return content;
+    }
+    return null;
   }
 
   int? _readInt(dynamic value) {

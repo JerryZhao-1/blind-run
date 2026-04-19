@@ -13,6 +13,8 @@ import 'package:aidrun_demo/core/models/run_rating.dart';
 import 'package:aidrun_demo/core/models/run_request_input.dart';
 import 'package:aidrun_demo/core/models/run_status.dart';
 import 'package:aidrun_demo/core/models/user_role.dart';
+import 'package:aidrun_demo/core/models/volunteer_accept_run_result.dart';
+import 'package:aidrun_demo/core/models/volunteer_intake_readiness.dart';
 import 'package:aidrun_demo/core/models/volunteer_profile.dart';
 import 'package:aidrun_demo/core/repositories/order_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -63,6 +65,8 @@ class AppStateController extends Notifier<AppState> {
 
   AppSettings get settings => state.settings;
   CurrentUser? get currentUser => state.currentUser;
+  VolunteerIntakeReadiness get volunteerIntakeReadiness =>
+      state.volunteerIntakeReadiness;
 
   List<Run> get pendingRuns => state.volunteerAvailableRuns;
 
@@ -74,6 +78,10 @@ class AppStateController extends Notifier<AppState> {
   Run? get volunteerActiveRun => state.volunteerMyRuns
       .where((run) => run.status.isVolunteerActive)
       .sortedByUpdated()
+      .firstOrNull;
+
+  Run? volunteerOwnedRunById(String id) => state.volunteerMyRuns
+      .where((run) => run.id == id)
       .firstOrNull;
 
   List<Run> get volunteerHistoryRuns => state.volunteerMyRuns
@@ -177,9 +185,9 @@ class AppStateController extends Notifier<AppState> {
     state = state.copyWith(blindRuns: runs, clearError: true);
   }
 
-  Future<void> refreshVolunteerDashboard() async {
+  Future<bool> refreshVolunteerDashboard() async {
     if (state.role != UserRole.volunteer) {
-      return;
+      return false;
     }
     final results = await Future.wait([
       _guardUnauthorized(
@@ -192,24 +200,59 @@ class AppStateController extends Notifier<AppState> {
     final availableRuns = results[0];
     final myRuns = results[1];
     if (availableRuns == null || myRuns == null) {
-      return;
+      if (state.settings.volunteerAvailable &&
+          state.volunteerIntakeReadiness == VolunteerIntakeReadiness.onlineReady) {
+        state = state.copyWith(
+          volunteerIntakeReadiness: VolunteerIntakeReadiness.reportFailed,
+        );
+      }
+      return false;
     }
+    final previousRuns = {
+      for (final run in [
+        ...state.volunteerAvailableRuns,
+        ...state.volunteerMyRuns,
+      ])
+        run.id: run,
+    };
+    final availableById = {for (final run in availableRuns) run.id: run};
+    final hydratedMyRuns = myRuns
+        .map(
+          (run) => _mergeRunContinuity(
+            run.copyWith(volunteerOwnershipConfirmed: true),
+            availableById[run.id] ?? previousRuns[run.id],
+          ),
+        )
+        .toList(growable: false);
+    final ownedIds = hydratedMyRuns.map((run) => run.id).toSet();
+    final hydratedAvailableRuns = availableRuns
+        .where((run) => !ownedIds.contains(run.id))
+        .map((run) => _mergeRunContinuity(run, previousRuns[run.id]))
+        .toList(growable: false);
     state = state.copyWith(
-      volunteerAvailableRuns: availableRuns,
-      volunteerMyRuns: myRuns,
+      volunteerAvailableRuns: hydratedAvailableRuns,
+      volunteerMyRuns: hydratedMyRuns,
       clearError: true,
     );
+    return true;
   }
 
   Future<Run?> refreshOrder(String runId) async {
+    final previous = runById(runId);
     final run = await _guardUnauthorized(
       () => ref.read(orderRepositoryProvider).getOrder(runId),
     );
     if (run == null) {
       return null;
     }
-    _mergeRun(run);
-    return run;
+    final normalized = _mergeRunContinuity(
+      state.role == UserRole.volunteer
+          ? run.copyWith(volunteerOwnershipConfirmed: true)
+          : run,
+      previous,
+    );
+    _mergeRun(normalized);
+    return normalized;
   }
 
   Future<Run> createBlindRun(RunRequestInput input) async {
@@ -262,10 +305,32 @@ class AppStateController extends Notifier<AppState> {
     }
   }
 
-  Future<void> acceptRun(String runId) async {
-    await _guardUnauthorized(() => ref.read(orderRepositoryProvider).acceptOrder(runId));
-    await refreshVolunteerDashboard();
-    await refreshOrder(runId);
+  Future<VolunteerAcceptRunResult> acceptRun(String runId) async {
+    state = state.copyWith(clearError: true);
+    try {
+      await ref.read(orderRepositoryProvider).acceptOrder(runId);
+    } catch (error) {
+      return _handleAcceptRunError(error);
+    }
+    final refreshed = await refreshVolunteerDashboard();
+    final confirmedFromOwnedRuns = volunteerOwnedRunById(runId);
+    if (refreshed && confirmedFromOwnedRuns != null) {
+      final hydrated = await refreshOrder(runId);
+      return VolunteerAcceptRunResult.confirmed(
+        volunteerOwnedRunById(runId) ?? hydrated ?? confirmedFromOwnedRuns,
+      );
+    }
+
+    final hydrated = await refreshOrder(runId);
+    if (hydrated != null) {
+      return VolunteerAcceptRunResult.confirmed(
+        volunteerOwnedRunById(runId) ?? hydrated,
+      );
+    }
+
+    final message = state.errorMessage ?? '接单状态暂未确认，请稍后重试。';
+    state = state.copyWith(errorMessage: message);
+    return VolunteerAcceptRunResult.failed(message);
   }
 
   Future<void> markEnRoute(String runId) async {
@@ -417,20 +482,42 @@ class AppStateController extends Notifier<AppState> {
 
   void updateVolunteerAvailability(bool available) {
     _saveSettings(state.settings.copyWith(volunteerAvailable: available));
+    state = state.copyWith(
+      volunteerIntakeReadiness: available
+          ? VolunteerIntakeReadiness.connecting
+          : VolunteerIntakeReadiness.offline,
+      clearError: available,
+    );
   }
 
-  Future<void> reportVolunteerLocation({
+  void setVolunteerIntakeReadiness(
+    VolunteerIntakeReadiness readiness, {
+    bool clearError = false,
+    String? errorMessage,
+  }) {
+    state = state.copyWith(
+      volunteerIntakeReadiness: readiness,
+      clearError: clearError,
+      errorMessage: errorMessage,
+    );
+  }
+
+  Future<bool> reportVolunteerLocation({
     required double latitude,
     required double longitude,
     required bool isOnline,
   }) async {
-    await _guardUnauthorized(
-      () => ref.read(volunteerProfileRepositoryProvider).updateLocation(
-            latitude: latitude,
-            longitude: longitude,
-            isOnline: isOnline,
-          ),
+    final result = await _guardUnauthorized(
+      () async {
+        await ref.read(volunteerProfileRepositoryProvider).updateLocation(
+              latitude: latitude,
+              longitude: longitude,
+              isOnline: isOnline,
+            );
+        return true;
+      },
     );
+    return result != null;
   }
 
   Future<void> refreshReview(String runId) async {
@@ -485,6 +572,10 @@ class AppStateController extends Notifier<AppState> {
         currentUser: currentUser,
         role: currentUser.role,
         bootstrapping: false,
+        volunteerIntakeReadiness: resolvedSession.role == UserRole.volunteer &&
+                state.settings.volunteerAvailable
+            ? VolunteerIntakeReadiness.connecting
+            : VolunteerIntakeReadiness.offline,
       );
       await _refreshPostAuth();
     } catch (error) {
@@ -537,21 +628,48 @@ class AppStateController extends Notifier<AppState> {
   }
 
   void _mergeRun(Run run) {
-    List<Run> merge(List<Run> source) {
+    List<Run> merge(List<Run> source, {required bool addIfMissing}) {
       final existingIndex = source.indexWhere((item) => item.id == run.id);
       if (existingIndex == -1) {
-        return source;
+        if (!addIfMissing) {
+          return source;
+        }
+        return [...source, run];
       }
       final updated = [...source];
-      updated[existingIndex] = run;
+      updated[existingIndex] = _mergeRunContinuity(run, updated[existingIndex]);
       return updated;
     }
 
+    final shouldStoreInBlind = state.role == UserRole.blind ||
+        state.blindRuns.any((item) => item.id == run.id);
+    final shouldStoreInVolunteerMy = run.volunteerOwnershipConfirmed ||
+        state.volunteerMyRuns.any((item) => item.id == run.id);
+    final shouldStoreInVolunteerAvailable = !run.volunteerOwnershipConfirmed &&
+        state.volunteerAvailableRuns.any((item) => item.id == run.id);
+
     state = state.copyWith(
-      blindRuns: merge(state.blindRuns),
-      volunteerMyRuns: merge(state.volunteerMyRuns),
-      volunteerAvailableRuns: merge(state.volunteerAvailableRuns),
+      blindRuns: merge(state.blindRuns, addIfMissing: shouldStoreInBlind),
+      volunteerMyRuns: merge(
+        state.volunteerMyRuns,
+        addIfMissing: shouldStoreInVolunteerMy,
+      ),
+      volunteerAvailableRuns: run.volunteerOwnershipConfirmed
+          ? state.volunteerAvailableRuns
+                .where((item) => item.id != run.id)
+                .toList(growable: false)
+          : merge(
+              state.volunteerAvailableRuns,
+              addIfMissing: shouldStoreInVolunteerAvailable,
+            ),
     );
+  }
+
+  Run _mergeRunContinuity(Run run, Run? fallback) {
+    if (fallback == null) {
+      return run;
+    }
+    return run.mergedWith(fallback);
   }
 
   void _saveSettings(AppSettings settings) {
@@ -573,6 +691,18 @@ class AppStateController extends Notifier<AppState> {
       }
       return null;
     }
+  }
+
+  VolunteerAcceptRunResult _handleAcceptRunError(Object error) {
+    if (!ref.mounted) {
+      return const VolunteerAcceptRunResult.failed('接单失败，请稍后重试。');
+    }
+    if (error is ApiFailure && error.isUnauthorized) {
+      logout();
+    } else {
+      state = state.copyWith(errorMessage: _messageForError(error));
+    }
+    return VolunteerAcceptRunResult.failed(_messageForError(error));
   }
 
   String _messageForError(Object error) {
