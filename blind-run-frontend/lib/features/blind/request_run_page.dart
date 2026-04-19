@@ -95,16 +95,36 @@ class _RequestRunPageState extends ConsumerState<RequestRunPage> {
       return;
     }
     setState(() => _submitting = true);
-    final run = ref
-        .read(appStateControllerProvider.notifier)
-        .createBlindRun(RunRequestInput(place: place, timeLabel: _timeLabel));
-    await ref
-        .read(blindAccessibilityServiceProvider)
-        .announceStatusChange('预约成功，正在为您匹配志愿者。');
-    if (!mounted) {
-      return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final run = await ref
+          .read(appStateControllerProvider.notifier)
+          .createBlindRun(RunRequestInput(place: place, timeLabel: _timeLabel));
+      await ref
+          .read(blindAccessibilityServiceProvider)
+          .announceStatusChange('预约成功，正在为您匹配志愿者。');
+      if (!mounted) {
+        return;
+      }
+      context.go('/blind/run/${run.id}');
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      final message =
+          ref.read(appStateControllerProvider).errorMessage ?? '提交失败，请稍后重试';
+      await ref.read(blindAccessibilityServiceProvider).announceError(message);
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
     }
-    context.go('/blind/run/${run.id}');
   }
 
   static String _voiceMessageForState(

@@ -19,6 +19,10 @@ class Run {
     this.longitude,
     this.distanceKm,
     this.durationMinutes,
+    this.plannedStart,
+    this.plannedEnd,
+    this.volunteerPhone,
+    this.blindUserPhone,
   });
 
   final String id;
@@ -36,6 +40,10 @@ class Run {
   final double? longitude;
   final double? distanceKm;
   final int? durationMinutes;
+  final DateTime? plannedStart;
+  final DateTime? plannedEnd;
+  final String? volunteerPhone;
+  final String? blindUserPhone;
 
   Run copyWith({
     String? id,
@@ -55,6 +63,10 @@ class Run {
     double? longitude,
     double? distanceKm,
     int? durationMinutes,
+    DateTime? plannedStart,
+    DateTime? plannedEnd,
+    String? volunteerPhone,
+    String? blindUserPhone,
   }) {
     return Run(
       id: id ?? this.id,
@@ -72,6 +84,38 @@ class Run {
       longitude: longitude ?? this.longitude,
       distanceKm: distanceKm ?? this.distanceKm,
       durationMinutes: durationMinutes ?? this.durationMinutes,
+      plannedStart: plannedStart ?? this.plannedStart,
+      plannedEnd: plannedEnd ?? this.plannedEnd,
+      volunteerPhone: volunteerPhone ?? this.volunteerPhone,
+      blindUserPhone: blindUserPhone ?? this.blindUserPhone,
     );
+  }
+
+  static String formatTimeLabel(DateTime? start, DateTime? end) {
+    if (start == null) {
+      return '';
+    }
+    final now = DateTime.now();
+    final sameDay = start.year == now.year &&
+        start.month == now.month &&
+        start.day == now.day;
+    final tomorrow = now.add(const Duration(days: 1));
+    final isTomorrow = start.year == tomorrow.year &&
+        start.month == tomorrow.month &&
+        start.day == tomorrow.day;
+    final startText = _hhmm(start);
+    final endText = end == null ? null : _hhmm(end);
+    final prefix = sameDay
+        ? '今天'
+        : isTomorrow
+            ? '明天'
+            : '${start.month}月${start.day}日';
+    return endText == null ? '$prefix $startText' : '$prefix $startText-$endText';
+  }
+
+  static String _hhmm(DateTime value) {
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
   }
 }

@@ -1,5 +1,7 @@
 import 'package:aidrun_demo/app/providers.dart';
 import 'package:aidrun_demo/core/models/user_role.dart';
+import 'package:aidrun_demo/features/auth/loading_page.dart';
+import 'package:aidrun_demo/features/auth/login_page.dart';
 import 'package:aidrun_demo/features/blind/blind_active_run_page.dart';
 import 'package:aidrun_demo/features/blind/blind_dashboard_page.dart';
 import 'package:aidrun_demo/features/blind/place_search_page.dart';
@@ -15,27 +17,38 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final refreshListenable = ref.watch(goRouterRefreshProvider);
 
   return GoRouter(
-    initialLocation: '/',
+    initialLocation: '/loading',
     refreshListenable: refreshListenable,
     redirect: (context, state) {
-      final role = ref.read(appStateControllerProvider).role;
+      final appState = ref.read(appStateControllerProvider);
+      final role = appState.role;
       final location = state.fullPath ?? state.uri.toString();
+      final isLoadingRoute = location == '/loading';
+      final isLoginRoute = location == '/login';
+      final isRoleSelectionRoute = location == '/role-selection';
       final isBlindRoute = location.startsWith('/blind');
       final isVolunteerRoute = location.startsWith('/volunteer');
       final isSettingsRoute = location == '/settings';
 
-      if (location == '/') {
+      if (appState.bootstrapping) {
+        return isLoadingRoute ? null : '/loading';
+      }
+
+      if (!appState.isAuthenticated) {
+        return isLoginRoute ? null : '/login';
+      }
+
+      if (role == UserRole.unset) {
+        return isRoleSelectionRoute ? null : '/role-selection';
+      }
+
+      if (isLoadingRoute || isLoginRoute || isRoleSelectionRoute) {
         if (role == UserRole.blind) {
           return '/blind';
         }
         if (role == UserRole.volunteer) {
           return '/volunteer';
         }
-        return null;
-      }
-
-      if (role == null) {
-        return '/';
       }
 
       if (isBlindRoute && role != UserRole.blind) {
@@ -55,6 +68,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/',
+        builder: (context, state) => const LoadingPage(),
+      ),
+      GoRoute(
+        path: '/loading',
+        builder: (context, state) => const LoadingPage(),
+      ),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => const LoginPage(),
+      ),
+      GoRoute(
+        path: '/role-selection',
         builder: (context, state) => const RoleSelectionPage(),
       ),
       GoRoute(

@@ -18,13 +18,19 @@ class _RoleSelectionPageState extends ConsumerState<RoleSelectionPage> {
 
   Future<void> _selectRole(UserRole role) async {
     setState(() => _isRouting = true);
-    ref.read(appStateControllerProvider.notifier).selectRole(role);
-    final speech = ref.read(speechServiceProvider);
-    await speech.speak('已切换到${role.label}模式');
-    if (!mounted) {
-      return;
+    try {
+      await ref.read(appStateControllerProvider.notifier).submitRole(role);
+      final speech = ref.read(speechServiceProvider);
+      await speech.speak('已切换到${role.label}模式');
+      if (!mounted) {
+        return;
+      }
+      context.go(role == UserRole.blind ? '/blind' : '/volunteer');
+    } finally {
+      if (mounted) {
+        setState(() => _isRouting = false);
+      }
     }
-    context.go(role == UserRole.blind ? '/blind' : '/volunteer');
   }
 
   @override

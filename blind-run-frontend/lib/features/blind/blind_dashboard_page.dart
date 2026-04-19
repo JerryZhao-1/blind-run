@@ -27,19 +27,8 @@ class _BlindDashboardPageState extends ConsumerState<BlindDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(appStateControllerProvider);
     final controller = ref.read(appStateControllerProvider.notifier);
-    final activeRun = state.runs
-        .where((run) => run.blindRunnerId == controller.currentUser?.id)
-        .where(
-          (run) => [
-            RunStatus.pending,
-            RunStatus.accepted,
-            RunStatus.arrived,
-            RunStatus.running,
-          ].contains(run.status),
-        )
-        .firstOrNull;
+    final activeRun = controller.blindActiveRun;
 
     return BlindPageScaffold(
       aiButtonKey: const Key('blind-ai-assistant-button'),
@@ -90,11 +79,11 @@ class _BlindDashboardPageState extends ConsumerState<BlindDashboardPage> {
               BlindAccessibleButton(
                 onPressed: () {
                   controller.logout();
-                  context.go('/');
+                  context.go('/login');
                 },
                 enabled: true,
-                label: '切换角色',
-                hint: '退出盲人模式并返回角色选择',
+                label: '退出登录',
+                hint: '退出当前账号并返回登录页',
                 child: FilledButton.icon(
                   onPressed: () {},
                   style: FilledButton.styleFrom(
@@ -105,9 +94,9 @@ class _BlindDashboardPageState extends ConsumerState<BlindDashboardPage> {
                       vertical: 16,
                     ),
                   ),
-                  icon: const Icon(Icons.logout),
-                  label: const Text(
-                    '切换角色',
+                    icon: const Icon(Icons.logout),
+                    label: const Text(
+                    '退出登录',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,

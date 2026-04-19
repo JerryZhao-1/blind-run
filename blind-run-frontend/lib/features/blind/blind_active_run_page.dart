@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:aidrun_demo/app/providers.dart';
 import 'package:aidrun_demo/core/models/run_rating.dart';
 import 'package:aidrun_demo/core/models/run_status.dart';
@@ -18,18 +20,16 @@ class BlindActiveRunPage extends ConsumerStatefulWidget {
 }
 
 class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
+  Timer? _pollingTimer;
   RunStatus? _lastAnnouncedStatus;
   bool _ratedAnnouncementSent = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final run = ref
-          .read(appStateControllerProvider)
-          .runs
-          .where((item) => item.id == widget.runId)
-          .firstOrNull;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _refresh();
+      final run = ref.read(appStateControllerProvider.notifier).runById(widget.runId);
       if (run == null) {
         return;
       }
@@ -38,24 +38,62 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
           .read(blindAccessibilityServiceProvider)
           .announcePage(_statusAnnouncement(run.status));
     });
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refresh());
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    await ref.read(appStateControllerProvider.notifier).refreshOrder(widget.runId);
+    await ref.read(appStateControllerProvider.notifier).refreshReview(widget.runId);
   }
 
   String _statusAnnouncement(RunStatus status) {
     return switch (status) {
-      RunStatus.pending => '当前状态：正在匹配志愿者，请原地等待。',
-      RunStatus.accepted => '当前状态：志愿者已接单，正在赶来。',
-      RunStatus.arrived => '当前状态：志愿者已到达，请准备汇合。',
-      RunStatus.running => '当前状态：已经开始跑步。',
+      RunStatus.pendingMatch => '当前状态：正在匹配志愿者，请原地等待。',
+      RunStatus.pendingAccept => '当前状态：已有志愿者收到邀请，正在等待确认。',
+      RunStatus.inProgress => '当前状态：志愿者已接单。',
+      RunStatus.driverEnRoute => '当前状态：志愿者正在赶来。',
+      RunStatus.driverArrived => '当前状态：志愿者已到达，请准备汇合。',
       RunStatus.completed => '当前状态：行程已结束，请评价本次志愿服务。',
       RunStatus.cancelled => '当前状态：本次行程已取消。',
+      RunStatus.rematching => '当前状态：系统正在重新匹配志愿者。',
+      RunStatus.noVolunteer => '当前状态：暂无志愿者响应，你可以稍后再试或取消行程。',
     };
+  }
+
+  String _statusSupportText(RunStatus status) {
+    return switch (status) {
+      RunStatus.pendingMatch => '请在原地等待',
+      RunStatus.pendingAccept => '正在等待志愿者确认',
+      RunStatus.inProgress => '志愿者已接单，请保持沟通',
+      RunStatus.driverEnRoute => '志愿者正在赶来',
+      RunStatus.driverArrived => '请与志愿者汇合',
+      RunStatus.completed => '感谢您的使用',
+      RunStatus.cancelled => '本次行程已取消',
+      RunStatus.rematching => '系统正在重新匹配',
+      RunStatus.noVolunteer => '当前暂无志愿者可接单',
+    };
+  }
+
+  bool _canCancel(RunStatus status) {
+    return {
+      RunStatus.pendingMatch,
+      RunStatus.pendingAccept,
+      RunStatus.rematching,
+      RunStatus.noVolunteer,
+    }.contains(status);
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appStateControllerProvider);
     final controller = ref.read(appStateControllerProvider.notifier);
-    final run = state.runs.where((item) => item.id == widget.runId).firstOrNull;
+    final run = controller.runById(widget.runId);
     if (run == null) {
       return const Scaffold(body: Center(child: Text('未找到行程')));
     }
@@ -115,8 +153,11 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
             const SizedBox(height: 32),
             for (final rating in RunRating.values) ...[
               BlindAccessibleButton(
-                onPressed: () {
-                  controller.rateRun(widget.runId, rating);
+                onPressed: () async {
+                  await controller.rateRun(widget.runId, rating);
+                  if (!context.mounted) {
+                    return;
+                  }
                   context.go('/blind');
                 },
                 enabled: true,
@@ -157,21 +198,18 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
       );
     }
 
+    final hasVolunteerPhone =
+        (run.volunteerPhone ?? run.volunteer?.phone ?? '').trim().isNotEmpty;
+    final volunteerDisplayPhone =
+        run.volunteerPhone ?? run.volunteer?.phone ?? '暂未分配';
+
     return BlindPageScaffold(
       aiButtonKey: const Key('blind-ai-assistant-button'),
       body: ListView(
         children: [
           Semantics(
             container: true,
-            label:
-                '当前行程状态${run.status.blindLabel}。${switch (run.status) {
-                  RunStatus.pending => '请在原地等待。',
-                  RunStatus.accepted => '志愿者正在赶来。',
-                  RunStatus.arrived => '请与志愿者汇合。',
-                  RunStatus.running => '享受跑步的乐趣吧。',
-                  RunStatus.completed => '感谢您的使用。',
-                  RunStatus.cancelled => '本次行程已取消。',
-                }}',
+            label: '当前行程状态${run.status.blindLabel}。${_statusSupportText(run.status)}。',
             child: SectionCard(
               color: AppTheme.zinc,
               child: Column(
@@ -186,14 +224,7 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    switch (run.status) {
-                      RunStatus.pending => '请在原地等待',
-                      RunStatus.accepted => '志愿者正在赶来',
-                      RunStatus.arrived => '请与志愿者汇合',
-                      RunStatus.running => '享受跑步的乐趣吧',
-                      RunStatus.completed => '感谢您的使用',
-                      RunStatus.cancelled => '本次行程已取消',
-                    },
+                    _statusSupportText(run.status),
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 22,
@@ -205,39 +236,27 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
             ),
           ),
           const SizedBox(height: 16),
-          if (run.volunteer != null &&
-              [
-                RunStatus.accepted,
-                RunStatus.arrived,
-                RunStatus.running,
-              ].contains(run.status))
+          if (hasVolunteerPhone)
             Semantics(
               container: true,
-              label:
-                  '志愿者信息，姓名${run.volunteer!.name}，评分${run.volunteer!.rating.toStringAsFixed(1)}。',
+              label: '志愿者联系方式，手机号$volunteerDisplayPhone。',
               child: SectionCard(
                 color: AppTheme.zinc,
                 child: Row(
                   children: [
-                    CircleAvatar(
+                    const CircleAvatar(
                       radius: 42,
                       backgroundColor: Colors.white10,
-                      child: Text(
-                        run.volunteer!.name.characters.first,
-                        style: const TextStyle(
-                          fontSize: 32,
-                          color: Colors.white,
-                        ),
-                      ),
+                      child: Icon(Icons.person, color: Colors.white),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            run.volunteer!.name,
-                            style: const TextStyle(
+                          const Text(
+                            '志愿者联系方式',
+                            style: TextStyle(
                               color: Colors.white,
                               fontSize: 26,
                               fontWeight: FontWeight.w800,
@@ -245,7 +264,7 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '评分 ${run.volunteer!.rating.toStringAsFixed(1)}',
+                            volunteerDisplayPhone,
                             style: const TextStyle(
                               color: AppTheme.yellow,
                               fontSize: 20,
@@ -259,13 +278,7 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
                 ),
               ),
             ),
-          if (run.volunteer != null &&
-              [
-                RunStatus.accepted,
-                RunStatus.arrived,
-                RunStatus.running,
-              ].contains(run.status))
-            const SizedBox(height: 16),
+          if (hasVolunteerPhone) const SizedBox(height: 16),
           Semantics(
             container: true,
             label:
@@ -286,126 +299,16 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          if (run.status == RunStatus.pending)
-            _SemanticButton(
-              label: '测试，模拟志愿者接单',
-              hint: '将当前状态切换为志愿者已接单',
-              onPressed: () {
-                controller.acceptRun(run.id);
-              },
-              child: OutlinedButton(
-                onPressed: () {},
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 22),
-                ),
-                child: const Text(
-                  '[测试] 模拟志愿者接单',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-                ),
-              ),
-            ),
-          if (run.status == RunStatus.accepted) ...[
-            _SemanticButton(
-              label: '联系志愿者',
-              hint: '当前为演示按钮，不会拨号',
-              onPressed: () {},
-              child: FilledButton.icon(
-                onPressed: () {},
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.emerald,
-                  foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 22),
-                ),
-                icon: const Icon(Icons.phone),
-                label: const Text(
-                  '联系志愿者',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            _SemanticButton(
-              label: '测试，模拟志愿者到达',
-              hint: '将当前状态切换为志愿者已到达',
-              onPressed: () =>
-                  controller.updateRunStatus(run.id, RunStatus.arrived),
-              child: OutlinedButton(
-                onPressed: () {},
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                ),
-                child: const Text(
-                  '[测试] 模拟志愿者到达',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
-          ],
-          if (run.status == RunStatus.arrived)
-            _SemanticButton(
-              label: '测试，模拟开始跑步',
-              hint: '将当前状态切换为开始跑步',
-              onPressed: () =>
-                  controller.updateRunStatus(run.id, RunStatus.running),
-              child: OutlinedButton(
-                onPressed: () {},
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                ),
-                child: const Text(
-                  '[测试] 模拟开始跑步',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
-          if (run.status == RunStatus.running)
-            _SemanticButton(
-              label: '测试，模拟结束行程',
-              hint: '将当前状态切换为行程完成，并进入评价',
-              onPressed: () =>
-                  controller.updateRunStatus(run.id, RunStatus.completed),
-              child: OutlinedButton(
-                onPressed: () {},
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                ),
-                child: const Text(
-                  '[测试] 模拟结束行程',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
-          if ([RunStatus.pending, RunStatus.accepted].contains(run.status)) ...[
-            const SizedBox(height: 12),
+          if (_canCancel(run.status)) ...[
+            const SizedBox(height: 16),
             _SemanticButton(
               label: '取消行程',
               hint: '取消当前陪跑请求并返回盲人主页',
-              onPressed: () {
-                controller.cancelRun(run.id);
+              onPressed: () async {
+                await controller.cancelRun(run.id);
+                if (!context.mounted) {
+                  return;
+                }
                 context.go('/blind');
               },
               child: FilledButton.icon(
@@ -424,6 +327,13 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
                 ),
               ),
+            ),
+          ],
+          if (state.errorMessage != null) ...[
+            const SizedBox(height: 16),
+            Text(
+              state.errorMessage!,
+              style: const TextStyle(color: AppTheme.red),
             ),
           ],
         ],
