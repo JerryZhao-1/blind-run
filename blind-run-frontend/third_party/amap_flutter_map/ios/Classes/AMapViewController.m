@@ -241,14 +241,12 @@
 //MARK: 定位相关回调
 
 - (void)mapView:(MAMapView *)mapView didChangeUserTrackingMode:(MAUserTrackingMode)mode animated:(BOOL)animated {
-    NSLog(@"%s,mapView:%@ mode:%ld",__func__,mapView,(long)mode);
 }
 /**
  * @brief 在地图View将要启动定位时，会调用此函数
  * @param mapView 地图View
  */
 - (void)mapViewWillStartLocatingUser:(MAMapView *)mapView {
-    NSLog(@"%s,mapView:%@",__func__,mapView);
 }
 
 /**
@@ -256,7 +254,6 @@
  * @param mapView 地图View
  */
 - (void)mapViewDidStopLocatingUser:(MAMapView *)mapView {
-    NSLog(@"%s,mapView:%@",__func__,mapView);
 }
 
 /**
@@ -303,11 +300,9 @@
  * @param mapView 地图View
  */
 - (void)mapViewDidFinishLoadingMap:(MAMapView *)mapView {
-    NSLog(@"%s,mapView:%@",__func__,mapView);
 }
 
 - (void)mapInitComplete:(MAMapView *)mapView {
-    NSLog(@"%s,mapView:%@",__func__,mapView);
     self.mapInitCompleted = YES;
     if (self.waitForMapCallBack) {
         self.waitForMapCallBack(nil);

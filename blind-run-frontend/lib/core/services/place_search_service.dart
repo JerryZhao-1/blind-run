@@ -54,13 +54,18 @@ class AMapPlaceSearchService implements PlaceSearchService {
       return const [];
     }
 
-    if (!_config.hasWebKey) {
+    var effectiveConfig = _config;
+    if (!effectiveConfig.hasWebKey) {
+      effectiveConfig = await AMapConfig.load();
+    }
+
+    if (!effectiveConfig.hasWebKey) {
       return _searchFallback(trimmed);
     }
 
     try {
       final queryParameters = <String, String>{
-        'key': _config.webKey,
+        'key': effectiveConfig.webKey,
         'keywords': trimmed,
         'datatype': 'poi',
         'city': '北京',

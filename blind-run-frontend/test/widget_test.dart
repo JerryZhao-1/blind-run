@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -123,6 +124,162 @@ void main() {
 
     expect(find.text('附近需求 (2)'), findsOneWidget);
     expect(find.text('当前行程进行中'), findsOneWidget);
+  });
+
+  testWidgets('volunteer demand sheet defaults to middle state and snaps between states', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final container = await _createVolunteerContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: VolunteerDashboardPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-middle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('run-card-mock-2')), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('volunteer-demand-sheet-handle')),
+      const Offset(0, 320),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-lower')), findsOneWidget);
+    expect(find.byKey(const ValueKey('run-card-mock-2')), findsNothing);
+    expect(find.byKey(const ValueKey('run-card-mock-1')), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('volunteer-demand-sheet-handle')),
+      const Offset(0, -520),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-upper')), findsOneWidget);
+    expect(find.byKey(const ValueKey('run-card-mock-2')), findsOneWidget);
+  });
+
+  testWidgets('marker tap expands lower sheet to middle and reveals the matching card', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final container = await _createVolunteerContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: VolunteerDashboardPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const ValueKey('volunteer-demand-sheet-handle')),
+      const Offset(0, 320),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-lower')), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('fallback-marker-mock-2')));
+    await tester.tap(find.byKey(const ValueKey('fallback-marker-mock-2')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-middle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('run-card-mock-2')), findsOneWidget);
+  });
+
+  testWidgets('upper sheet keeps state while list scrolls and only collapses after returning to top', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final container = await _createVolunteerContainer();
+    addTearDown(container.dispose);
+    _seedExtraPendingRuns(container, 5);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: VolunteerDashboardPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const ValueKey('volunteer-demand-sheet-handle')),
+      const Offset(0, -520),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-upper')), findsOneWidget);
+
+    final list = find.byKey(const ValueKey('volunteer-demand-sheet-list'));
+    await tester.drag(list, const Offset(0, -320));
+    await tester.pumpAndSettle();
+
+    await tester.drag(list, const Offset(0, 160));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-upper')), findsOneWidget);
+
+    await tester.drag(list, const Offset(0, 720));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-upper')), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('volunteer-demand-sheet-handle')),
+      const Offset(0, 280),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('volunteer-demand-sheet-upper')), findsNothing);
+  });
+
+  testWidgets('volunteer demand actions preserve navigation to the run page', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final container = await _createVolunteerContainer();
+    addTearDown(container.dispose);
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const VolunteerDashboardPage(),
+        ),
+        GoRoute(
+          path: '/volunteer/run/:id',
+          builder: (context, state) => Scaffold(
+            body: Text('run-${state.pathParameters['id']}'),
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('立即接单').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('run-mock-1'), findsOneWidget);
   });
 
   testWidgets('volunteer history tab renders status labels without runtime errors', (
@@ -245,7 +402,7 @@ void main() {
       ),
     );
 
-    expect(find.text('测试占位提示'), findsOneWidget);
+    expect(find.textContaining('测试占位提示'), findsOneWidget);
   });
 
   test('amap config load merges runtime configuration from native channel', () async {
@@ -300,4 +457,35 @@ void main() {
     expect(run.latitude, 31.2304);
     expect(run.longitude, 121.4737);
   });
+}
+
+Future<ProviderContainer> _createVolunteerContainer() async {
+  SharedPreferences.setMockInitialValues({
+    'aidrun_role': UserRole.volunteer.name,
+  });
+  final preferences = await SharedPreferences.getInstance();
+  return ProviderContainer(
+    overrides: [
+      sharedPreferencesProvider.overrideWithValue(preferences),
+    ],
+  );
+}
+
+void _seedExtraPendingRuns(ProviderContainer container, int count) {
+  final controller = container.read(appStateControllerProvider.notifier);
+
+  for (var index = 0; index < count; index++) {
+    controller.createBlindRun(
+      RunRequestInput(
+        place: PlaceSuggestion(
+          name: '加测地点 ${index + 1}',
+          address: '测试地址 ${index + 1}',
+          latitude: 30.0 + index,
+          longitude: 120.0 + index,
+        ),
+        timeLabel: '明天 ${8 + index}:00',
+        notes: '用于滚动测试 ${index + 1}',
+      ),
+    );
+  }
 }

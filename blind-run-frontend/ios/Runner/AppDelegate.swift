@@ -6,6 +6,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let deviceChannelName = "aidrun/device"
+  private var deviceChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -13,7 +14,9 @@ import UIKit
   ) -> Bool {
     configureAMap()
     let didLaunch = super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    configureDeviceChannel()
+    if let controller = window?.rootViewController as? FlutterViewController {
+      configureDeviceChannel(using: controller.binaryMessenger)
+    }
     return didLaunch
   }
 
@@ -32,14 +35,14 @@ import UIKit
     AMapServices.shared().apiKey = apiKey
   }
 
-  private func configureDeviceChannel() {
-    guard let controller = window?.rootViewController as? FlutterViewController else {
+  func configureDeviceChannel(using binaryMessenger: FlutterBinaryMessenger) {
+    guard deviceChannel == nil else {
       return
     }
 
     let channel = FlutterMethodChannel(
       name: deviceChannelName,
-      binaryMessenger: controller.binaryMessenger
+      binaryMessenger: binaryMessenger
     )
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
@@ -49,36 +52,51 @@ import UIKit
         result(FlutterMethodNotImplemented)
       }
     }
+    deviceChannel = channel
   }
 
   private func currentAMapConfig() -> [String: String] {
-    guard
+    var values: [String: String] = [:]
+    if
       let encodedDefines = Bundle.main.object(forInfoDictionaryKey: "FlutterDartDefines") as? String,
       !encodedDefines.isEmpty
-    else {
-      return [:]
+    {
+      for encoded in encodedDefines.split(separator: ",") {
+        guard let decoded = decodeDartDefine(String(encoded)) else {
+          continue
+        }
+
+        let parts = decoded.split(separator: "=", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else {
+          continue
+        }
+
+        switch parts[0] {
+        case "AMAP_ANDROID_KEY":
+          values["androidKey"] = parts[1]
+        case "AMAP_IOS_KEY":
+          values["iosKey"] = parts[1]
+        case "AMAP_WEB_KEY":
+          values["webKey"] = parts[1]
+        default:
+          continue
+        }
+      }
     }
 
-    var values: [String: String] = [:]
-    for encoded in encodedDefines.split(separator: ",") {
-      guard let decoded = decodeDartDefine(String(encoded)) else {
-        continue
+    if values["iosKey"]?.isEmpty ?? true {
+      if let plistKey = Bundle.main.object(forInfoDictionaryKey: "AMAP_IOS_KEY") as? String,
+         !plistKey.isEmpty,
+         plistKey != "$(AMAP_IOS_KEY)" {
+        values["iosKey"] = plistKey
       }
+    }
 
-      let parts = decoded.split(separator: "=", maxSplits: 1).map(String.init)
-      guard parts.count == 2 else {
-        continue
-      }
-
-      switch parts[0] {
-      case "AMAP_ANDROID_KEY":
-        values["androidKey"] = parts[1]
-      case "AMAP_IOS_KEY":
-        values["iosKey"] = parts[1]
-      case "AMAP_WEB_KEY":
-        values["webKey"] = parts[1]
-      default:
-        continue
+    if values["webKey"]?.isEmpty ?? true {
+      if let plistKey = Bundle.main.object(forInfoDictionaryKey: "AMAP_WEB_KEY") as? String,
+         !plistKey.isEmpty,
+         plistKey != "$(AMAP_WEB_KEY)" {
+        values["webKey"] = plistKey
       }
     }
 

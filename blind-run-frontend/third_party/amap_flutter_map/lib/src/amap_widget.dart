@@ -178,7 +178,6 @@ class _MapState extends State<AMapWidget> {
     _markers = keyByMarkerId(widget.markers);
     _polygons = keyByPolygonId(widget.polygons);
     _polylines = keyByPolylineId(widget.polylines);
-    print('initState AMapWidget');
   }
 
   @override
@@ -186,19 +185,16 @@ class _MapState extends State<AMapWidget> {
     super.dispose();
     AMapController controller = await _controller.future;
     controller.disponse();
-    print('dispose AMapWidget with mapId: ${controller.mapId}');
   }
 
   @override
   void reassemble() {
     super.reassemble();
-    print('reassemble AMapWidget');
   }
 
   @override
   void deactivate() async {
     super.deactivate();
-    print('deactivate AMapWidget}');
   }
 
   @override

@@ -6,6 +6,10 @@
 	<true/>
 	<key>FlutterDartDefines</key>
 	<string>$(DART_DEFINES)</string>
+	<key>AMAP_IOS_KEY</key>
+	<string>$(AMAP_IOS_KEY)</string>
+	<key>AMAP_WEB_KEY</key>
+	<string>$(AMAP_WEB_KEY)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
