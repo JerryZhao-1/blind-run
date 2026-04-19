@@ -13,6 +13,7 @@ class AMapMarkerViewData {
     required this.longitude,
     required this.title,
     this.snippet,
+    this.onTap,
   });
 
   final String id;
@@ -20,6 +21,7 @@ class AMapMarkerViewData {
   final double longitude;
   final String title;
   final String? snippet;
+  final VoidCallback? onTap;
 }
 
 class AMapMapView extends StatelessWidget {
@@ -48,7 +50,8 @@ class AMapMapView extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!config.supportsNativeMap) {
       return _MapFallback(
-        message: fallbackMessage ?? '未配置高德地图 Key，当前显示地图占位状态。',
+        message: _missingNativeMapMessage(),
+        markers: markers,
       );
     }
 
@@ -59,12 +62,14 @@ class AMapMapView extends StatelessWidget {
           if (!snapshot.hasData) {
             return _MapFallback(
               message: fallbackMessage ?? '地图初始化中，请稍候。',
+              markers: markers,
             );
           }
           if (snapshot.data == true) {
             return _MapFallback(
               message:
                   fallbackMessage ?? 'Android 模拟器上的高德原生地图不稳定，当前显示地图占位。请使用真机查看真实地图效果。',
+              markers: markers,
             );
           }
           return _buildNativeMap();
@@ -83,6 +88,7 @@ class AMapMapView extends StatelessWidget {
           title: item.title,
           snippet: item.snippet,
         ),
+        onTap: (_) => item.onTap?.call(),
       );
     }).toSet();
 
@@ -108,15 +114,43 @@ class AMapMapView extends StatelessWidget {
       ),
     );
   }
+
+  String _missingNativeMapMessage() {
+    final keySummary =
+        'native keys: android=${config.hasAndroidKey ? "yes" : "no"}, ios=${config.hasIosKey ? "yes" : "no"}';
+    if (fallbackMessage != null) {
+      final diagnosis = switch (Platform.operatingSystem) {
+        'android' when !config.hasAndroidKey => '缺少 Android 高德 Key',
+        'ios' when !config.hasIosKey => '缺少 iOS 高德 Key',
+        _ when !config.hasNativeKeys => '缺少高德原生 Key',
+        _ => '当前环境不支持原生高德地图',
+      };
+      return '$fallbackMessage\n$diagnosis\n$keySummary';
+    }
+
+    if (Platform.isAndroid && !config.hasAndroidKey) {
+      return '未配置 Android 高德 Key，当前显示地图占位状态。\n$keySummary';
+    }
+    if (Platform.isIOS && !config.hasIosKey) {
+      return '未配置 iOS 高德 Key，当前显示地图占位状态。\n$keySummary';
+    }
+    return '当前环境不支持原生高德地图，当前显示地图占位状态。\n$keySummary';
+  }
 }
 
 class _MapFallback extends StatelessWidget {
-  const _MapFallback({required this.message});
+  const _MapFallback({
+    required this.message,
+    required this.markers,
+  });
 
   final String message;
+  final List<AMapMarkerViewData> markers;
 
   @override
   Widget build(BuildContext context) {
+    final tappableMarkers = markers.where((marker) => marker.onTap != null).toList();
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFF2F4F7),
@@ -126,13 +160,34 @@ class _MapFallback extends StatelessWidget {
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Color(0xFF344054),
-              fontWeight: FontWeight.w600,
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF344054),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (tappableMarkers.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final marker in tappableMarkers)
+                      OutlinedButton(
+                        key: ValueKey('fallback-marker-${marker.id}'),
+                        onPressed: marker.onTap,
+                        child: Text(marker.title),
+                      ),
+                  ],
+                ),
+              ],
+            ],
           ),
         ),
       ),

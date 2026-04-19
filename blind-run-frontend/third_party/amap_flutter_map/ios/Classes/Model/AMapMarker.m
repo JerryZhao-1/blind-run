@@ -17,12 +17,18 @@
 
 @implementation AMapMarker
 
++ (NSArray<NSString *> *)optionalProperties {
+    return @[@"annotation", @"image", @"flat"];
+}
+
 - (instancetype)init {
     self = [super init];
     if (self) {
         _alpha = 1.0;
+        _anchor = CGPointMake(0.5, 1.0);
         _clickable = YES;
         _draggable = NO;
+        _flat = NO;
         _visible = YES;
     }
     return self;

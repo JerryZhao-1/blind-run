@@ -76,7 +76,17 @@ class _VolunteerDashboardPageState extends ConsumerState<VolunteerDashboardPage>
   }
 }
 
-class _VolunteerMapTab extends StatelessWidget {
+enum _VolunteerDemandSheetState {
+  lower(0.22),
+  middle(0.56),
+  upper(0.78);
+
+  const _VolunteerDemandSheetState(this.size);
+
+  final double size;
+}
+
+class _VolunteerMapTab extends StatefulWidget {
   const _VolunteerMapTab({
     required this.config,
     required this.controller,
@@ -90,8 +100,134 @@ class _VolunteerMapTab extends StatelessWidget {
   final Run? activeRun;
 
   @override
+  State<_VolunteerMapTab> createState() => _VolunteerMapTabState();
+}
+
+class _VolunteerMapTabState extends State<_VolunteerMapTab> {
+  late final DraggableScrollableController _sheetController;
+  final Map<String, GlobalKey> _runCardKeys = <String, GlobalKey>{};
+  _VolunteerDemandSheetState _sheetState = _VolunteerDemandSheetState.middle;
+  _VolunteerDemandSheetState _dragStartState = _VolunteerDemandSheetState.middle;
+
+  @override
+  void initState() {
+    super.initState();
+    _sheetController = DraggableScrollableController();
+  }
+
+  @override
+  void dispose() {
+    _sheetController.dispose();
+    super.dispose();
+  }
+
+  GlobalKey _runCardKeyFor(String runId) {
+    return _runCardKeys.putIfAbsent(runId, () => GlobalKey());
+  }
+
+  _VolunteerDemandSheetState _stateForSize(double size) {
+    if (size < 0.39) {
+      return _VolunteerDemandSheetState.lower;
+    }
+    if (size < 0.67) {
+      return _VolunteerDemandSheetState.middle;
+    }
+    return _VolunteerDemandSheetState.upper;
+  }
+
+  Future<void> _animateSheetTo(_VolunteerDemandSheetState state) async {
+    if (!_sheetController.isAttached) {
+      return;
+    }
+    await _sheetController.animateTo(
+      state.size,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Future<void> _focusRunCard(String runId) async {
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    if (!mounted) {
+      return;
+    }
+    final cardContext = _runCardKeyFor(runId).currentContext;
+    if (cardContext == null || !cardContext.mounted) {
+      return;
+    }
+    await Scrollable.ensureVisible(
+      cardContext,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      alignment: 0.02,
+    );
+  }
+
+  Future<void> _handleMarkerTap(String runId) async {
+    if (_sheetState == _VolunteerDemandSheetState.lower) {
+      await _animateSheetTo(_VolunteerDemandSheetState.middle);
+    }
+    await _focusRunCard(runId);
+  }
+
+  void _handleHeaderDragStart(DragStartDetails details) {
+    _dragStartState = _sheetState;
+  }
+
+  void _handleHeaderDragUpdate(
+    DragUpdateDetails details,
+    double availableHeight,
+  ) {
+    if (!_sheetController.isAttached || details.primaryDelta == null) {
+      return;
+    }
+    final nextSize = (_sheetController.size - details.primaryDelta! / availableHeight)
+        .clamp(
+          _VolunteerDemandSheetState.lower.size,
+          _VolunteerDemandSheetState.upper.size,
+        );
+    _sheetController.jumpTo(nextSize);
+  }
+
+  Future<void> _handleHeaderDragEnd(DragEndDetails details) async {
+    final velocity = details.primaryVelocity ?? 0;
+    _VolunteerDemandSheetState targetState;
+
+    if (velocity.abs() > 700) {
+      if (velocity < 0) {
+        targetState = switch (_dragStartState) {
+          _VolunteerDemandSheetState.lower => _VolunteerDemandSheetState.middle,
+          _VolunteerDemandSheetState.middle => _VolunteerDemandSheetState.upper,
+          _VolunteerDemandSheetState.upper => _VolunteerDemandSheetState.upper,
+        };
+      } else {
+        targetState = switch (_dragStartState) {
+          _VolunteerDemandSheetState.lower => _VolunteerDemandSheetState.lower,
+          _VolunteerDemandSheetState.middle => _VolunteerDemandSheetState.lower,
+          _VolunteerDemandSheetState.upper => _VolunteerDemandSheetState.middle,
+        };
+      }
+    } else {
+      targetState = _stateForSize(
+        _sheetController.isAttached ? _sheetController.size : _sheetState.size,
+      );
+    }
+
+    await _animateSheetTo(targetState);
+  }
+
+  bool _handleSheetNotification(DraggableScrollableNotification notification) {
+    final nextState = _stateForSize(notification.extent);
+    if (nextState != _sheetState) {
+      setState(() => _sheetState = nextState);
+    }
+    return false;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final currentActiveRun = activeRun;
+    final currentActiveRun = widget.activeRun;
+    final pendingRuns = widget.pendingRuns;
     final points = pendingRuns
         .where((run) => run.latitude != null && run.longitude != null)
         .map((run) => AMapMarkerViewData(
@@ -100,23 +236,21 @@ class _VolunteerMapTab extends StatelessWidget {
               longitude: run.longitude!,
               title: run.location,
               snippet: run.address.isEmpty ? run.timeLabel : run.address,
+              onTap: () => _handleMarkerTap(run.id),
             ))
         .toList();
 
     return Stack(
       children: [
         Positioned.fill(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 180),
-            child: AMapMapView(
-              config: config,
-              centerLatitude: 39.9042,
-              centerLongitude: 116.4074,
-              zoom: 11,
-              showMyLocation: true,
-              markers: points,
-              fallbackMessage: '高德地图未配置完成，当前显示附近需求列表，地图区域已降级。',
-            ),
+          child: AMapMapView(
+            config: widget.config,
+            centerLatitude: 39.9042,
+            centerLongitude: 116.4074,
+            zoom: 11,
+            showMyLocation: true,
+            markers: points,
+            fallbackMessage: '高德地图未配置完成，当前显示附近需求列表，地图区域已降级。',
           ),
         ),
         Positioned(
@@ -140,18 +274,109 @@ class _VolunteerMapTab extends StatelessWidget {
             ),
           ),
         ),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: Container(
-            height: MediaQuery.of(context).size.height * 0.56,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
+        Positioned.fill(
+          child: NotificationListener<DraggableScrollableNotification>(
+            onNotification: _handleSheetNotification,
+            child: DraggableScrollableSheet(
+              controller: _sheetController,
+              initialChildSize: _VolunteerDemandSheetState.middle.size,
+              minChildSize: _VolunteerDemandSheetState.lower.size,
+              maxChildSize: _VolunteerDemandSheetState.upper.size,
+              snap: true,
+              snapSizes: [
+                _VolunteerDemandSheetState.lower.size,
+                _VolunteerDemandSheetState.middle.size,
+                _VolunteerDemandSheetState.upper.size,
+              ],
+              builder: (context, scrollController) {
+                return _VolunteerDemandSheet(
+                  key: ValueKey('volunteer-demand-sheet-${_sheetState.name}'),
+                  sheetState: _sheetState,
+                  activeRun: currentActiveRun,
+                  pendingRuns: pendingRuns,
+                  scrollController: scrollController,
+                  onHeaderDragStart: _handleHeaderDragStart,
+                  onHeaderDragUpdate: _handleHeaderDragUpdate,
+                  onHeaderDragEnd: _handleHeaderDragEnd,
+                  onResumeRun: (runId) => context.go('/volunteer/run/$runId'),
+                  onAcceptRun: (runId) {
+                    widget.controller.acceptRun(runId);
+                    context.go('/volunteer/run/$runId');
+                  },
+                  runCardKeyFor: _runCardKeyFor,
+                );
+              },
             ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VolunteerDemandSheet extends StatelessWidget {
+  const _VolunteerDemandSheet({
+    super.key,
+    required this.sheetState,
+    required this.activeRun,
+    required this.pendingRuns,
+    required this.scrollController,
+    required this.onHeaderDragStart,
+    required this.onHeaderDragUpdate,
+    required this.onHeaderDragEnd,
+    required this.onResumeRun,
+    required this.onAcceptRun,
+    required this.runCardKeyFor,
+  });
+
+  final _VolunteerDemandSheetState sheetState;
+  final Run? activeRun;
+  final List<Run> pendingRuns;
+  final ScrollController scrollController;
+  final GestureDragStartCallback onHeaderDragStart;
+  final void Function(DragUpdateDetails details, double availableHeight)
+      onHeaderDragUpdate;
+  final GestureDragEndCallback onHeaderDragEnd;
+  final ValueChanged<String> onResumeRun;
+  final ValueChanged<String> onAcceptRun;
+  final GlobalKey Function(String runId) runCardKeyFor;
+
+  @override
+  Widget build(BuildContext context) {
+    final visiblePendingRuns = sheetState == _VolunteerDemandSheetState.lower
+        ? pendingRuns.take(1).toList(growable: false)
+        : pendingRuns;
+    final listPhysics = sheetState == _VolunteerDemandSheetState.upper
+        ? const ClampingScrollPhysics()
+        : const NeverScrollableScrollPhysics();
+
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 18,
+            offset: Offset(0, -6),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragStart: onHeaderDragStart,
+            onVerticalDragUpdate: (details) => onHeaderDragUpdate(
+              details,
+              MediaQuery.sizeOf(context).height,
+            ),
+            onVerticalDragEnd: onHeaderDragEnd,
             child: Column(
               children: [
                 const SizedBox(height: 12),
                 Container(
+                  key: const ValueKey('volunteer-demand-sheet-handle'),
                   width: 48,
                   height: 5,
                   decoration: BoxDecoration(
@@ -160,7 +385,7 @@ class _VolunteerMapTab extends StatelessWidget {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
                   child: Row(
                     children: [
                       Text(
@@ -173,131 +398,170 @@ class _VolunteerMapTab extends StatelessWidget {
                     ],
                   ),
                 ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    children: [
-                      if (currentActiveRun != null)
-                        GestureDetector(
-                          onTap: () =>
-                              context.go('/volunteer/run/${currentActiveRun.id}'),
-                          child: SectionCard(
-                            color: Colors.black,
-                            child: const Row(
-                              children: [
-                                Icon(Icons.navigation, color: Colors.white),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    '当前行程进行中',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      if (currentActiveRun != null) const SizedBox(height: 12),
-                      for (final run in pendingRuns) ...[
-                        SectionCard(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.softGray,
-                                      borderRadius: BorderRadius.circular(18),
-                                    ),
-                                    child: const Icon(Icons.place),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          run.location,
-                                          style: const TextStyle(
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.w900,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          run.timeLabel,
-                                          style: const TextStyle(
-                                            color: Colors.black54,
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                        if (run.notes.isNotEmpty) ...[
-                                          const SizedBox(height: 12),
-                                          Container(
-                                            width: double.infinity,
-                                            padding: const EdgeInsets.all(12),
-                                            decoration: BoxDecoration(
-                                              color: AppTheme.softGray,
-                                              borderRadius: BorderRadius.circular(14),
-                                            ),
-                                            child: Text('备注: ${run.notes}'),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              SizedBox(
-                                width: double.infinity,
-                                child: FilledButton(
-                                  onPressed: currentActiveRun != null
-                                      ? null
-                                      : () {
-                                          controller.acceptRun(run.id);
-                                          context.go('/volunteer/run/${run.id}');
-                                        },
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: Colors.black,
-                                    foregroundColor: Colors.white,
-                                    disabledBackgroundColor: Colors.black12,
-                                    disabledForegroundColor: Colors.black38,
-                                    padding: const EdgeInsets.symmetric(vertical: 16),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    currentActiveRun != null ? '请先完成当前行程' : '立即接单',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      const SizedBox(height: 40),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
-        ),
-      ],
+          Expanded(
+            child: ListView(
+              key: const ValueKey('volunteer-demand-sheet-list'),
+              controller: scrollController,
+              physics: listPhysics,
+              padding: EdgeInsets.fromLTRB(
+                20,
+                0,
+                20,
+                20 + MediaQuery.of(context).padding.bottom,
+              ),
+              children: [
+                if (activeRun != null) ...[
+                  GestureDetector(
+                    key: const ValueKey('active-run-card'),
+                    onTap: () => onResumeRun(activeRun!.id),
+                    child: SectionCard(
+                      color: Colors.black,
+                      child: const Row(
+                        children: [
+                          Icon(Icons.navigation, color: Colors.white),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '当前行程进行中',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                for (final run in visiblePendingRuns) ...[
+                  KeyedSubtree(
+                    key: runCardKeyFor(run.id),
+                    child: _VolunteerDemandCard(
+                      key: ValueKey('run-card-${run.id}'),
+                      run: run,
+                      hasActiveRun: activeRun != null,
+                      onAccept: () => onAcceptRun(run.id),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (pendingRuns.isEmpty && activeRun == null)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: Text(
+                        '暂无附近需求',
+                        style: TextStyle(color: Colors.black54),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VolunteerDemandCard extends StatelessWidget {
+  const _VolunteerDemandCard({
+    super.key,
+    required this.run,
+    required this.hasActiveRun,
+    required this.onAccept,
+  });
+
+  final Run run;
+  final bool hasActiveRun;
+  final VoidCallback onAccept;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.softGray,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Icon(Icons.place),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      run.location,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      run.timeLabel,
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (run.notes.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.softGray,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text('备注: ${run.notes}'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: hasActiveRun ? null : onAccept,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.black12,
+                disabledForegroundColor: Colors.black38,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              child: Text(
+                hasActiveRun ? '请先完成当前行程' : '立即接单',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

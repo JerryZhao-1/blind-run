@@ -100,6 +100,14 @@
     
     //获取clazz属性列表
     NSArray *propertyArray = [self allPropertiesOfClass:modelClass];
+    NSArray *optionalProperties = nil;
+    SEL optionalPropertiesSel = NSSelectorFromString(@"optionalProperties");
+    if ([modelClass respondsToSelector:optionalPropertiesSel]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        optionalProperties = [modelClass performSelector:optionalPropertiesSel];
+#pragma clang diagnostic pop
+    }
     NSMutableArray* missedProperties = [NSMutableArray array];
     id ret = [[modelClass alloc] init];
     //枚举clazz中的每个属性，然后赋值
@@ -111,6 +119,9 @@
             value = [dict objectForKey:@"id"];
         }
         if(!value) {
+            if ([optionalProperties containsObject:propertyName]) {
+                continue;
+            }
             [missedProperties addObject:propertyName];
             continue;
         }

@@ -9,4 +9,16 @@
 
 @implementation AMapInfoWindow
 
++ (NSArray<NSString *> *)optionalProperties {
+    return @[@"anchor"];
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _anchor = CGPointZero;
+    }
+    return self;
+}
+
 @end

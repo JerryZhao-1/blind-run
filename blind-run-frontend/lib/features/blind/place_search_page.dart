@@ -1,5 +1,6 @@
 import 'package:aidrun_demo/app/providers.dart';
 import 'package:aidrun_demo/core/models/place_suggestion.dart';
+import 'package:aidrun_demo/core/services/amap_config.dart';
 import 'package:aidrun_demo/core/services/amap_location_service.dart';
 import 'package:aidrun_demo/core/services/speech_recognition_service.dart';
 import 'package:aidrun_demo/core/theme/app_theme.dart';
@@ -24,6 +25,8 @@ class _BlindPlaceSearchPageState extends ConsumerState<BlindPlaceSearchPage> {
   bool _loading = false;
   List<PlaceSuggestion> _results = const [];
   DeviceLocation? _currentLocation;
+  bool _resolvedEffectiveConfig = false;
+  bool _hasEffectiveWebKey = false;
   VoiceCaptureState _voiceState = VoiceCaptureState.idle;
   String _voiceMessage = '输入地点名称，或使用语音搜索地点。';
 
@@ -35,10 +38,15 @@ class _BlindPlaceSearchPageState extends ConsumerState<BlindPlaceSearchPage> {
           .read(blindAccessibilityServiceProvider)
           .announcePage('地点搜索页面。请输入地点名称，或使用语音搜索。搜索结果会读出地点和地址。');
       final location = await ref.read(appLocationServiceProvider).locateOnce();
+      final effectiveConfig = await AMapConfig.load();
       if (!mounted) {
         return;
       }
-      setState(() => _currentLocation = location);
+      setState(() {
+        _currentLocation = location;
+        _resolvedEffectiveConfig = true;
+        _hasEffectiveWebKey = effectiveConfig.hasWebKey;
+      });
     });
   }
 
@@ -123,7 +131,8 @@ class _BlindPlaceSearchPageState extends ConsumerState<BlindPlaceSearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final config = ref.watch(aMapConfigProvider);
+    final showMissingWebKeyWarning =
+        _resolvedEffectiveConfig ? !_hasEffectiveWebKey : false;
 
     return BlindPageScaffold(
       aiButtonKey: const Key('blind-ai-assistant-button'),
@@ -169,7 +178,7 @@ class _BlindPlaceSearchPageState extends ConsumerState<BlindPlaceSearchPage> {
       ),
       body: ListView(
         children: [
-          if (!config.hasWebKey) ...[
+          if (showMissingWebKeyWarning) ...[
             Semantics(
               container: true,
               label: '当前未配置高德地点搜索 key，地点候选将回退为本地演示数据。',

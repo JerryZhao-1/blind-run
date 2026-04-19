@@ -59,7 +59,9 @@ class AMapConfig {
       return hasAndroidKey;
     }
     if (Platform.isIOS) {
-      return hasIosKey;
+      // iOS can receive the effective key from native runtime configuration
+      // even when Dart-side startup reads an empty value during early launch.
+      return true;
     }
     return false;
   }
