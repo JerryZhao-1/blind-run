@@ -37,6 +37,7 @@ migrate_working_dir/
 /build/
 /coverage/
 ios/Flutter/Amap.local.xcconfig
+.demo-video/
 
 # Symbolication related
 app.*.symbols

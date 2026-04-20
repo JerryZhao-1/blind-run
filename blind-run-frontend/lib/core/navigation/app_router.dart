@@ -21,6 +21,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refreshListenable,
     redirect: (context, state) {
       final appState = ref.read(appStateControllerProvider);
+      final demoMode = ref.read(demoShowcaseModeProvider);
+      final demoStartupRoute = ref.read(demoStartupRouteProvider);
       final role = appState.role;
       final location = state.fullPath ?? state.uri.toString();
       final isLoadingRoute = location == '/loading';
@@ -42,7 +44,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return isRoleSelectionRoute ? null : '/role-selection';
       }
 
-      if (isLoadingRoute || isLoginRoute || isRoleSelectionRoute) {
+      if (isLoadingRoute ||
+          isLoginRoute ||
+          isRoleSelectionRoute) {
+        if (demoMode) {
+          return demoStartupRoute;
+        }
         if (role == UserRole.blind) {
           return '/blind';
         }

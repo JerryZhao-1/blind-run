@@ -15,6 +15,8 @@ import 'package:aidrun_demo/core/services/order_time_resolver.dart';
 import 'package:aidrun_demo/core/services/place_search_service.dart';
 import 'package:aidrun_demo/core/services/speech_recognition_service.dart';
 import 'package:aidrun_demo/core/services/speech_service.dart';
+import 'package:aidrun_demo/demo/demo_mode.dart';
+import 'package:aidrun_demo/demo/demo_scenario_store.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -44,6 +46,32 @@ final apiBaseUrlProvider = Provider<String>((ref) {
     defaultValue: 'http://47.114.113.171',
   );
 });
+
+final demoShowcaseModeProvider = Provider<bool>((ref) => kDemoShowcaseMode);
+
+final demoShowcaseScenarioProvider = Provider<DemoShowcaseScenario>((ref) {
+  final normalized = kDemoShowcaseScenarioKey.trim().toLowerCase();
+  return switch (normalized) {
+    'blind' => DemoShowcaseScenario.blindJourney,
+    _ => DemoShowcaseScenario.volunteerJourney,
+  };
+});
+
+final demoVideoCaptureSceneProvider = Provider<DemoVideoCaptureScene?>((ref) {
+  return DemoVideoCaptureSceneX.fromConfigKey(kDemoVideoCaptureSceneKey);
+});
+
+final demoStartupRouteProvider = Provider<String>((ref) {
+  final captureScene = ref.watch(demoVideoCaptureSceneProvider);
+  if (captureScene != null) {
+    return captureScene.targetRoute;
+  }
+  return ref.watch(demoShowcaseScenarioProvider).targetRoute;
+});
+
+final demoScenarioStoreProvider = Provider<DemoScenarioStore>(
+  (ref) => DemoScenarioStore(),
+);
 
 final apiClientProvider = Provider<ApiClient>(
   (ref) => ApiClient(

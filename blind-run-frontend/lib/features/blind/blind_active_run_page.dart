@@ -143,6 +143,7 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(appStateControllerProvider);
     final controller = ref.read(appStateControllerProvider.notifier);
+    final demoMode = ref.watch(demoShowcaseModeProvider);
     final run = controller.runById(widget.runId);
     if (run == null) {
       return const Scaffold(body: Center(child: Text('未找到行程')));
@@ -367,6 +368,32 @@ class _BlindActiveRunPageState extends ConsumerState<BlindActiveRunPage> {
                 icon: const Icon(Icons.cancel),
                 label: const Text(
                   '取消行程',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+          ],
+          if (demoMode && run.status == RunStatus.driverArrived) ...[
+            const SizedBox(height: 16),
+            _SemanticButton(
+              label: '结束行程',
+              hint: '结束当前演示行程并进入评价页面',
+              onPressed: () async {
+                await controller.finishRun(run.id);
+              },
+              child: FilledButton.icon(
+                onPressed: () {},
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.emerald,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 22),
+                ),
+                icon: const Icon(Icons.flag),
+                label: const Text(
+                  '结束行程',
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
                 ),
               ),

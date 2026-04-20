@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AidRun Demo Video Compositor</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #06080e;
+        color: #f5f7fb;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .shell {
+        width: min(100vw, 1200px);
+        display: grid;
+        gap: 16px;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+
+      canvas {
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        background: #06080e;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+      }
+
+      .controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        background: #ffffff;
+        color: #06080e;
+        padding: 12px 18px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .hint {
+        opacity: 0.75;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <canvas id="stage" width="1920" height="1080"></canvas>
+      <div class="controls">
+        <button id="previewButton" type="button">预览并导出</button>
+        <span class="hint" id="status">等待开始</span>
+      </div>
+    </main>
+
+    <script>
+      const canvas = document.getElementById("stage");
+      const context = canvas.getContext("2d");
+      const statusNode = document.getElementById("status");
+
+      const query = new URLSearchParams(window.location.search);
+      const clipsBaseUrl = new URL(
+        query.get("clips") || "../../.demo-video/raw/",
+        window.location.href
+      );
+      const manifestUrl = new URL("./review_manifest.json", window.location.href);
+      const mimeType = MediaRecorder.isTypeSupported(
+        "video/mp4;codecs=avc1.42E01E,mp4a.40.2"
+      )
+        ? "video/mp4;codecs=avc1.42E01E,mp4a.40.2"
+        : "video/webm;codecs=vp9,opus";
+
+      function setStatus(message) {
+        statusNode.textContent = message;
+      }
+
+      function leftPaneRect(canvasConfig) {
+        const paneWidth =
+          (canvasConfig.width -
+            canvasConfig.horizontalPadding * 2 -
+            canvasConfig.paneGap) /
+          2;
+        const paneHeight =
+          canvasConfig.height - canvasConfig.topPadding - canvasConfig.bottomPadding;
+        return {
+          x: canvasConfig.horizontalPadding,
+          y: canvasConfig.topPadding,
+          width: paneWidth,
+          height: paneHeight,
+        };
+      }
+
+      function rightPaneRect(canvasConfig) {
+        const left = leftPaneRect(canvasConfig);
+        return {
+          x: left.x + left.width + canvasConfig.paneGap,
+          y: left.y,
+          width: left.width,
+          height: left.height,
+        };
+      }
+
+      function aspectFitRect(sourceWidth, sourceHeight, targetRect) {
+        const scale = Math.min(
+          targetRect.width / sourceWidth,
+          targetRect.height / sourceHeight
+        );
+        const fittedWidth = sourceWidth * scale;
+        const fittedHeight = sourceHeight * scale;
+        return {
+          x: targetRect.x + (targetRect.width - fittedWidth) / 2,
+          y: targetRect.y + (targetRect.height - fittedHeight) / 2,
+          width: fittedWidth,
+          height: fittedHeight,
+        };
+      }
+
+      function loadVideo(url) {
+        return new Promise((resolve, reject) => {
+          const video = document.createElement("video");
+          video.src = url.toString();
+          video.preload = "auto";
+          video.muted = true;
+          video.playsInline = true;
+          video.crossOrigin = "anonymous";
+          const handleLoaded = () => resolve(video);
+          const handleError = () =>
+            reject(new Error(`无法加载视频: ${url.toString()}`));
+          video.addEventListener("loadedmetadata", handleLoaded, { once: true });
+          video.addEventListener("error", handleError, { once: true });
+        });
+      }
+
+      function drawBackdrop(manifest) {
+        context.fillStyle = manifest.canvas.backgroundHex;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        context.fillStyle = "rgba(245, 247, 251, 0.96)";
+        context.font = "600 42px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+
+        const left = leftPaneRect(manifest.canvas);
+        const right = rightPaneRect(manifest.canvas);
+        context.fillText(manifest.labels.left, left.x + left.width / 2, 48);
+        context.fillText(manifest.labels.right, right.x + right.width / 2, 48);
+      }
+
+      function drawVideo(video, targetRect, sourceCrop) {
+        const sourceWidth = sourceCrop?.width || video.videoWidth;
+        const sourceHeight = sourceCrop?.height || video.videoHeight;
+        const fitted = aspectFitRect(sourceWidth, sourceHeight, targetRect);
+        context.drawImage(
+          video,
+          sourceCrop?.x || 0,
+          sourceCrop?.y || 0,
+          sourceWidth,
+          sourceHeight,
+          fitted.x,
+          fitted.y,
+          fitted.width,
+          fitted.height
+        );
+      }
+
+      function wait(milliseconds) {
+        return new Promise((resolve) => setTimeout(resolve, milliseconds));
+      }
+
+      async function playSegment(manifest, segment) {
+        const [leftVideo, rightVideo] = await Promise.all([
+          loadVideo(new URL(segment.leftClip, clipsBaseUrl)),
+          loadVideo(new URL(segment.rightClip, clipsBaseUrl)),
+        ]);
+        const duration = Math.min(leftVideo.duration, rightVideo.duration);
+        if (!duration || Number.isNaN(duration)) {
+          throw new Error(`片段 ${segment.id} 没有可用时长`);
+        }
+
+        await Promise.all([leftVideo.play(), rightVideo.play()]);
+
+        const left = leftPaneRect(manifest.canvas);
+        const right = rightPaneRect(manifest.canvas);
+        const startedAt = performance.now();
+
+        await new Promise((resolve) => {
+          function frame() {
+            const elapsedSeconds = (performance.now() - startedAt) / 1000;
+            drawBackdrop(manifest);
+            drawVideo(leftVideo, left, manifest.sourceCrop || null);
+            drawVideo(rightVideo, right, manifest.sourceCrop || null);
+            if (elapsedSeconds < duration) {
+              requestAnimationFrame(frame);
+              return;
+            }
+            resolve();
+          }
+          requestAnimationFrame(frame);
+        });
+
+        leftVideo.pause();
+        rightVideo.pause();
+      }
+
+      async function renderDemoBlob() {
+        const manifest = await fetch(manifestUrl).then((response) => {
+          if (!response.ok) {
+            throw new Error(`无法读取 manifest: ${response.status}`);
+          }
+          return response.json();
+        });
+
+        drawBackdrop(manifest);
+        const stream = canvas.captureStream(30);
+        const chunks = [];
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: 8_000_000,
+        });
+        recorder.addEventListener("dataavailable", (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        });
+
+        const stopped = new Promise((resolve) => {
+          recorder.addEventListener(
+            "stop",
+            () => {
+              resolve(new Blob(chunks, { type: mimeType }));
+            },
+            { once: true }
+          );
+        });
+
+        recorder.start(1000);
+        for (const [index, segment] of manifest.segments.entries()) {
+          setStatus(`正在渲染片段 ${index + 1}/${manifest.segments.length}`);
+          await playSegment(manifest, segment);
+          await wait(120);
+        }
+        recorder.stop();
+        return await stopped;
+      }
+
+      async function downloadDemoVideo() {
+        const blob = await renderDemoBlob();
+        const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `aidrun-demo-review.${extension}`;
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return anchor.download;
+      }
+
+      window.renderDemoBlob = renderDemoBlob;
+      window.downloadDemoVideo = downloadDemoVideo;
+
+      document
+        .getElementById("previewButton")
+        .addEventListener("click", async () => {
+          try {
+            setStatus("开始导出");
+            await downloadDemoVideo();
+            setStatus("导出完成");
+          } catch (error) {
+            console.error(error);
+            setStatus(error.message || "导出失败");
+          }
+        });
+    </script>
+  </body>
+</html>

@@ -24,6 +24,16 @@
 5. 兼容入口：已配置本地 `.env` 后可直接运行
    `./scripts/flutter_run_with_amap.sh`
 
+## 展示分支启动
+
+- 展示分支会直接注入固定场景，无需真实后端登录，但建议同时提供可用的高德 key 以显示真实地图画面
+- 志愿者展示启动命令
+  `flutter run --dart-define-from-file=.env --dart-define=DEMO_SHOWCASE_MODE=true --dart-define=DEMO_SHOWCASE_SCENARIO=volunteer`
+- 盲人展示启动命令
+  `flutter run --dart-define-from-file=.env --dart-define=DEMO_SHOWCASE_MODE=true --dart-define=DEMO_SHOWCASE_SCENARIO=blind`
+- 展示分支会直接进入选定角色的真实产品页面，不再显示额外的展示入口或提示标识
+- 展示地图、定位和地点搜索会使用应用内固定点位，保证每次彩排和录制画面稳定一致
+
 ## 高德地图配置
 
 - Android 原生地图/定位 SDK 与 Dart 层优先读取 Flutter `dart-defines` 注入的 `AMAP_ANDROID_KEY`；若未提供，Android 构建仍兼容回退到进程环境变量

@@ -1,0 +1,38 @@
+{
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "backgroundHex": "#06080E",
+    "horizontalPadding": 56,
+    "topPadding": 92,
+    "bottomPadding": 56,
+    "paneGap": 40
+  },
+  "labels": {
+    "left": "盲人端",
+    "right": "志愿者端"
+  },
+  "sourceCrop": {
+    "x": 3110,
+    "y": 230,
+    "width": 680,
+    "height": 1560
+  },
+  "segments": [
+    {
+      "id": "request-and-intake",
+      "leftClip": "blind-request.mov",
+      "rightClip": "volunteer-nearby.mov"
+    },
+    {
+      "id": "active-and-enroute",
+      "leftClip": "blind-active.mov",
+      "rightClip": "volunteer-enroute.mov"
+    },
+    {
+      "id": "review-and-complete",
+      "leftClip": "blind-review.mov",
+      "rightClip": "volunteer-complete.mov"
+    }
+  ]
+}

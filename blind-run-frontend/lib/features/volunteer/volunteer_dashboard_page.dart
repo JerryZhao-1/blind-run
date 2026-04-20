@@ -380,6 +380,9 @@ class _VolunteerMapTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final currentActiveRun = activeRun;
     final latestLocation = currentLocation;
+    final primaryPinnedRun =
+        currentActiveRun ??
+        pendingRuns.where((run) => run.latitude != null && run.longitude != null).firstOrNull;
     final points = pendingRuns
         .where((run) => run.latitude != null && run.longitude != null)
         .map(
@@ -403,6 +406,14 @@ class _VolunteerMapTab extends StatelessWidget {
         ),
       );
     }
+    final initialCenterLatitude =
+        latestLocation?.latitude ??
+        primaryPinnedRun?.latitude ??
+        23.0785;
+    final initialCenterLongitude =
+        latestLocation?.longitude ??
+        primaryPinnedRun?.longitude ??
+        114.4127;
     final isOnline = controller.settings.volunteerAvailable;
     final status = _readinessContent(readiness);
     final emptyState = _emptyStateCopy(readiness);
@@ -414,8 +425,8 @@ class _VolunteerMapTab extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 220),
             child: AMapMapView(
               config: config,
-              centerLatitude: 39.9042,
-              centerLongitude: 116.4074,
+              centerLatitude: initialCenterLatitude,
+              centerLongitude: initialCenterLongitude,
               zoom: 11,
               showMyLocation: true,
               markers: points,
@@ -485,15 +496,6 @@ class _VolunteerMapTab extends StatelessWidget {
             ),
             child: Column(
               children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 48,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
                 Padding(
                   padding: const EdgeInsets.all(20),
                   child: Column(

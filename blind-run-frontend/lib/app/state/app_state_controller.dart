@@ -7,6 +7,7 @@ import 'package:aidrun_demo/core/models/app_settings.dart';
 import 'package:aidrun_demo/core/models/auth_flow_state.dart';
 import 'package:aidrun_demo/core/models/blind_profile.dart';
 import 'package:aidrun_demo/core/models/current_user.dart';
+import 'package:aidrun_demo/core/models/emergency_contact.dart';
 import 'package:aidrun_demo/core/models/reward_item.dart';
 import 'package:aidrun_demo/core/models/run.dart';
 import 'package:aidrun_demo/core/models/run_rating.dart';
@@ -17,6 +18,7 @@ import 'package:aidrun_demo/core/models/volunteer_accept_run_result.dart';
 import 'package:aidrun_demo/core/models/volunteer_intake_readiness.dart';
 import 'package:aidrun_demo/core/models/volunteer_profile.dart';
 import 'package:aidrun_demo/core/repositories/order_repository.dart';
+import 'package:aidrun_demo/demo/demo_scenario_store.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class AppStateController extends Notifier<AppState> {
@@ -539,6 +541,9 @@ class AppStateController extends Notifier<AppState> {
   }
 
   void logout() {
+    if (ref.read(demoShowcaseModeProvider)) {
+      ref.read(demoScenarioStoreProvider).clear();
+    }
     ref.read(authSessionStoreProvider).clearSession();
     final settings = ref.read(settingsRepositoryProvider).load();
     state = AppState.initial(settings: settings, rewards: _rewards).copyWith(
@@ -547,7 +552,58 @@ class AppStateController extends Notifier<AppState> {
     );
   }
 
+  void enterDemoScenario(DemoShowcaseScenario scenario) {
+    final store = ref.read(demoScenarioStoreProvider);
+    store.activate(scenario);
+    _hydrateDemoState(store);
+  }
+
+  void enterDemoCaptureScene(DemoVideoCaptureScene scene) {
+    final store = ref.read(demoScenarioStoreProvider);
+    store.activateCaptureScene(scene);
+    _hydrateDemoState(store);
+  }
+
+  void _hydrateDemoState(DemoScenarioStore store) {
+    final settings = ref.read(settingsRepositoryProvider).load();
+    final session = store.session;
+    final currentUser = store.currentUser;
+    if (session != null) {
+      ref.read(authSessionStoreProvider).saveSession(session);
+    }
+    state = AppState.initial(settings: settings, rewards: _rewards).copyWith(
+      bootstrapping: false,
+      session: session,
+      currentUser: currentUser,
+      role: currentUser?.role,
+      blindProfile: store.blindProfile,
+      volunteerProfile: store.volunteerProfile,
+      emergencyContacts: List<EmergencyContact>.from(store.emergencyContacts),
+      blindRuns: List<Run>.from(store.blindRuns),
+      volunteerAvailableRuns: List<Run>.from(store.availableRuns),
+      volunteerMyRuns: List<Run>.from(store.volunteerRuns),
+      volunteerIntakeReadiness:
+          currentUser?.role == UserRole.volunteer &&
+                  settings.volunteerAvailable
+              ? VolunteerIntakeReadiness.connecting
+              : VolunteerIntakeReadiness.offline,
+      clearError: true,
+    );
+  }
+
   Future<void> _bootstrap() async {
+    if (ref.read(demoShowcaseModeProvider)) {
+      if (!ref.mounted) {
+        return;
+      }
+      final captureScene = ref.read(demoVideoCaptureSceneProvider);
+      if (captureScene != null) {
+        enterDemoCaptureScene(captureScene);
+      } else {
+        enterDemoScenario(ref.read(demoShowcaseScenarioProvider));
+      }
+      return;
+    }
     final session = ref.read(authSessionStoreProvider).readSession();
     if (session == null) {
       if (!ref.mounted) {
