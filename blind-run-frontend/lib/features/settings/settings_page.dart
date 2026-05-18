@@ -26,14 +26,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   void initState() {
     super.initState();
     final state = ref.read(appStateControllerProvider);
-    _blindNameController =
-        TextEditingController(text: state.blindProfile?.name ?? '');
-    _paceController =
-        TextEditingController(text: state.blindProfile?.runningPace ?? '');
-    _needsController =
-        TextEditingController(text: state.blindProfile?.specialNeeds ?? '');
-    _volunteerNameController =
-        TextEditingController(text: state.volunteerProfile?.name ?? '');
+    _blindNameController = TextEditingController(
+      text: state.blindProfile?.name ?? '',
+    );
+    _paceController = TextEditingController(
+      text: state.blindProfile?.runningPace ?? '',
+    );
+    _needsController = TextEditingController(
+      text: state.blindProfile?.specialNeeds ?? '',
+    );
+    _volunteerNameController = TextEditingController(
+      text: state.volunteerProfile?.name ?? '',
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final controller = ref.read(appStateControllerProvider.notifier);
@@ -123,7 +127,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             FilledButton.icon(
               onPressed: () async {
                 final navigator = Navigator.of(context);
-                final current = state.volunteerProfile ??
+                final current =
+                    state.volunteerProfile ??
                     const VolunteerProfile(
                       id: '',
                       name: '',
@@ -149,8 +154,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: () {
-                controller.logout();
+              onPressed: () async {
+                await controller.logout();
+                if (!context.mounted) {
+                  return;
+                }
                 context.go('/login');
               },
               style: OutlinedButton.styleFrom(
@@ -235,13 +243,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   _BlindContactTile(
                     contact: contact,
                     onEdit: () => _showContactDialog(existing: contact),
-                    onDelete: () =>
-                        ref.read(appStateControllerProvider.notifier).deleteEmergencyContact(contact.id),
+                    onDelete: () => ref
+                        .read(appStateControllerProvider.notifier)
+                        .deleteEmergencyContact(contact.id),
                     onSetPrimary: contact.isPrimary
                         ? null
                         : () => ref
-                            .read(appStateControllerProvider.notifier)
-                            .setPrimaryEmergencyContact(contact.id),
+                              .read(appStateControllerProvider.notifier)
+                              .setPrimaryEmergencyContact(contact.id),
                   ),
                   const SizedBox(height: 12),
                 ],
@@ -291,8 +300,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: () {
-              controller.logout();
+            onPressed: () async {
+              await controller.logout();
+              if (!context.mounted) {
+                return;
+              }
               context.go('/login');
             },
             style: FilledButton.styleFrom(
@@ -343,8 +355,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   Future<void> _showContactDialog({EmergencyContact? existing}) async {
     final nameController = TextEditingController(text: existing?.name ?? '');
     final phoneController = TextEditingController(text: existing?.phone ?? '');
-    final relationshipController =
-        TextEditingController(text: existing?.relationship ?? '');
+    final relationshipController = TextEditingController(
+      text: existing?.relationship ?? '',
+    );
     var isPrimary = existing?.isPrimary ?? false;
 
     await showDialog<void>(
@@ -390,7 +403,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   onPressed: () async {
                     final navigator = Navigator.of(context);
                     if (existing == null) {
-                      await ref.read(appStateControllerProvider.notifier).addEmergencyContact(
+                      await ref
+                          .read(appStateControllerProvider.notifier)
+                          .addEmergencyContact(
                             name: nameController.text.trim(),
                             phone: phoneController.text.trim(),
                             relationship: relationshipController.text.trim(),

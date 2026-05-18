@@ -104,8 +104,11 @@ class _BlindDashboardPageState extends ConsumerState<BlindDashboardPage> {
                 ),
               ),
               BlindAccessibleButton(
-                onPressed: () {
-                  controller.logout();
+                onPressed: () async {
+                  await controller.logout();
+                  if (!context.mounted) {
+                    return;
+                  }
                   context.go('/login');
                 },
                 enabled: true,

@@ -3,6 +3,7 @@ import 'package:aidrun_demo/core/models/auth_session.dart';
 import 'package:aidrun_demo/core/models/blind_profile.dart';
 import 'package:aidrun_demo/core/models/current_user.dart';
 import 'package:aidrun_demo/core/models/emergency_contact.dart';
+import 'package:aidrun_demo/core/models/realtime_dispatch_connection_status.dart';
 import 'package:aidrun_demo/core/models/reward_item.dart';
 import 'package:aidrun_demo/core/models/run.dart';
 import 'package:aidrun_demo/core/models/user_role.dart';
@@ -20,6 +21,7 @@ class AppState {
     required this.volunteerAvailableRuns,
     required this.volunteerMyRuns,
     required this.volunteerIntakeReadiness,
+    required this.realtimeDispatchConnectionStatus,
     this.session,
     this.currentUser,
     this.role,
@@ -44,6 +46,8 @@ class AppState {
       volunteerAvailableRuns: const [],
       volunteerMyRuns: const [],
       volunteerIntakeReadiness: VolunteerIntakeReadiness.offline,
+      realtimeDispatchConnectionStatus:
+          RealtimeDispatchConnectionStatus.disconnected,
     );
   }
 
@@ -58,6 +62,7 @@ class AppState {
   final List<Run> volunteerAvailableRuns;
   final List<Run> volunteerMyRuns;
   final VolunteerIntakeReadiness volunteerIntakeReadiness;
+  final RealtimeDispatchConnectionStatus realtimeDispatchConnectionStatus;
   final BlindProfile? blindProfile;
   final VolunteerProfile? volunteerProfile;
   final List<EmergencyContact> emergencyContacts;
@@ -82,6 +87,7 @@ class AppState {
     List<Run>? volunteerAvailableRuns,
     List<Run>? volunteerMyRuns,
     VolunteerIntakeReadiness? volunteerIntakeReadiness,
+    RealtimeDispatchConnectionStatus? realtimeDispatchConnectionStatus,
     BlindProfile? blindProfile,
     bool clearBlindProfile = false,
     VolunteerProfile? volunteerProfile,
@@ -106,8 +112,12 @@ class AppState {
       volunteerMyRuns: volunteerMyRuns ?? this.volunteerMyRuns,
       volunteerIntakeReadiness:
           volunteerIntakeReadiness ?? this.volunteerIntakeReadiness,
-      blindProfile:
-          clearBlindProfile ? null : (blindProfile ?? this.blindProfile),
+      realtimeDispatchConnectionStatus:
+          realtimeDispatchConnectionStatus ??
+          this.realtimeDispatchConnectionStatus,
+      blindProfile: clearBlindProfile
+          ? null
+          : (blindProfile ?? this.blindProfile),
       volunteerProfile: clearVolunteerProfile
           ? null
           : (volunteerProfile ?? this.volunteerProfile),

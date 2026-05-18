@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:aidrun_demo/app/providers.dart';
 import 'package:aidrun_demo/app/state/app_state_controller.dart';
+import 'package:aidrun_demo/core/models/realtime_dispatch_connection_status.dart';
 import 'package:aidrun_demo/core/models/reward_item.dart';
 import 'package:aidrun_demo/core/models/run.dart';
 import 'package:aidrun_demo/core/models/run_status.dart';
@@ -66,6 +67,7 @@ class _VolunteerDashboardPageState
     _refreshTimer?.cancel();
     _locationHeartbeatTimer?.cancel();
     unawaited(_sendOfflineLocation());
+    unawaited(_controller.stopRealtimeDispatch());
     super.dispose();
   }
 
@@ -182,6 +184,7 @@ class _VolunteerDashboardPageState
       VolunteerIntakeReadiness.onlineReady,
       clearError: true,
     );
+    await _controller.startRealtimeDispatch();
     if (mounted) {
       setState(() {
         _lastLocationStatusMessage = null;
@@ -313,6 +316,7 @@ class _VolunteerDashboardPageState
         pendingRuns: pendingRuns,
         activeRun: activeRun,
         readiness: state.volunteerIntakeReadiness,
+        realtimeStatus: state.realtimeDispatchConnectionStatus,
         errorMessage: _lastLocationStatusMessage ?? state.errorMessage,
         locationDebugInfo: _lastLocationDebugInfo,
         currentLocation: _latestVolunteerLocation,
@@ -356,6 +360,7 @@ class _VolunteerMapTab extends StatelessWidget {
     required this.pendingRuns,
     required this.activeRun,
     required this.readiness,
+    required this.realtimeStatus,
     required this.errorMessage,
     required this.locationDebugInfo,
     required this.currentLocation,
@@ -369,6 +374,7 @@ class _VolunteerMapTab extends StatelessWidget {
   final List<Run> pendingRuns;
   final Run? activeRun;
   final VolunteerIntakeReadiness readiness;
+  final RealtimeDispatchConnectionStatus realtimeStatus;
   final String? errorMessage;
   final String? locationDebugInfo;
   final DeviceLocation? currentLocation;
@@ -404,7 +410,7 @@ class _VolunteerMapTab extends StatelessWidget {
       );
     }
     final isOnline = controller.settings.volunteerAvailable;
-    final status = _readinessContent(readiness);
+    final status = _readinessContent(readiness, realtimeStatus);
     final emptyState = _emptyStateCopy(readiness);
 
     return Stack(
@@ -687,53 +693,109 @@ class _VolunteerMapTab extends StatelessWidget {
                                             ),
                                           ),
                                         ],
+                                        if (run.dispatchTimeoutSeconds !=
+                                            null) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            '响应倒计时 ${run.dispatchTimeoutSeconds} 秒',
+                                            style: const TextStyle(
+                                              color: Colors.black54,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ],
+                                        if ((run.dispatchPriority ?? '')
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            '优先级 ${run.dispatchPriority}',
+                                            style: const TextStyle(
+                                              color: Colors.black54,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              SizedBox(
-                                width: double.infinity,
-                                child: FilledButton(
-                                  onPressed: currentActiveRun != null
-                                      ? null
-                                      : () async {
-                                          final result = await controller.acceptRun(
-                                            run.id,
-                                          );
-                                          if (!context.mounted) {
-                                            return;
-                                          }
-                                          if (!result.isConfirmed) {
-                                            return;
-                                          }
-                                          context.go(
-                                            '/volunteer/run/${run.id}',
-                                          );
-                                        },
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: Colors.black,
-                                    foregroundColor: Colors.white,
-                                    disabledBackgroundColor: Colors.black12,
-                                    disabledForegroundColor: Colors.black38,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    currentActiveRun != null
-                                        ? '请先完成当前行程'
-                                        : '立即接单',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: currentActiveRun != null
+                                          ? null
+                                          : () => controller.declineRun(run.id),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: AppTheme.red,
+                                        side: const BorderSide(
+                                          color: Colors.black12,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Text(
+                                        '婉拒',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 2,
+                                    child: FilledButton(
+                                      onPressed: currentActiveRun != null
+                                          ? null
+                                          : () async {
+                                              final result = await controller
+                                                  .acceptRun(run.id);
+                                              if (!context.mounted) {
+                                                return;
+                                              }
+                                              if (!result.isConfirmed) {
+                                                return;
+                                              }
+                                              context.go(
+                                                '/volunteer/run/${run.id}',
+                                              );
+                                            },
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: Colors.black,
+                                        foregroundColor: Colors.white,
+                                        disabledBackgroundColor: Colors.black12,
+                                        disabledForegroundColor: Colors.black38,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        currentActiveRun != null
+                                            ? '请先完成当前行程'
+                                            : '立即接单',
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -765,7 +827,40 @@ class _ReadinessContent {
   final Color color;
 }
 
-_ReadinessContent _readinessContent(VolunteerIntakeReadiness readiness) {
+_ReadinessContent _readinessContent(
+  VolunteerIntakeReadiness readiness,
+  RealtimeDispatchConnectionStatus realtimeStatus,
+) {
+  if (readiness == VolunteerIntakeReadiness.onlineReady) {
+    switch (realtimeStatus) {
+      case RealtimeDispatchConnectionStatus.connecting:
+        return const _ReadinessContent(
+          title: '准备中 - 正在连接实时派单',
+          description: '当前位置已同步，正在建立实时派单连接。',
+          color: Colors.orange,
+        );
+      case RealtimeDispatchConnectionStatus.reconnecting:
+        return const _ReadinessContent(
+          title: '重连中 - 实时派单暂不可用',
+          description: '位置同步仍会继续，实时派单断开后正在自动重连。',
+          color: Colors.orange,
+        );
+      case RealtimeDispatchConnectionStatus.unavailable:
+        return const _ReadinessContent(
+          title: '位置在线 - 实时派单暂不可用',
+          description: '当前位置已同步，但实时派单连接失败，暂以附近订单刷新作为备用。',
+          color: AppTheme.red,
+        );
+      case RealtimeDispatchConnectionStatus.connected:
+        return const _ReadinessContent(
+          title: '在线 - 已可接收附近订单',
+          description: '当前位置已同步，实时派单连接已建立，有新需求会自动出现。',
+          color: AppTheme.emerald,
+        );
+      case RealtimeDispatchConnectionStatus.disconnected:
+        break;
+    }
+  }
   return switch (readiness) {
     VolunteerIntakeReadiness.offline => const _ReadinessContent(
       title: '离线 - 暂停接收新订单',
@@ -1066,8 +1161,11 @@ class _VolunteerProfileTab extends StatelessWidget {
                     style: TextStyle(color: AppTheme.red),
                   ),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    controller.logout();
+                  onTap: () async {
+                    await controller.logout();
+                    if (!context.mounted) {
+                      return;
+                    }
                     context.go('/login');
                   },
                 ),

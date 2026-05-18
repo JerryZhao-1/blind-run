@@ -341,6 +341,9 @@ Widget _buildBlindApp({
       if (placeSearchService != null)
         placeSearchServiceProvider.overrideWithValue(placeSearchService),
       appLocationServiceProvider.overrideWithValue(const FakeLocationService()),
+      realtimeWebSocketConnectorProvider.overrideWithValue(
+        FakeRealtimeWebSocketConnector(),
+      ),
       orderRepositoryProvider.overrideWithValue(
         orderRepository ?? FakeOrderRepository(),
       ),

@@ -8,7 +8,9 @@ import 'package:aidrun_demo/core/models/current_user.dart';
 import 'package:aidrun_demo/core/models/place_suggestion.dart';
 import 'package:aidrun_demo/core/models/run_request_input.dart';
 import 'package:aidrun_demo/core/models/run_status.dart';
+import 'package:aidrun_demo/core/models/role_selection_result.dart';
 import 'package:aidrun_demo/core/models/user_role.dart';
+import 'package:aidrun_demo/core/repositories/order_repository.dart';
 import 'package:aidrun_demo/core/services/amap_location_service.dart';
 import 'package:aidrun_demo/features/volunteer/volunteer_active_run_page.dart';
 import 'package:aidrun_demo/features/volunteer/volunteer_dashboard_page.dart';
@@ -95,6 +97,258 @@ void main() {
     expect(find.text('我是盲人跑者'), findsOneWidget);
     expect(find.text('我是志愿者'), findsOneWidget);
   });
+
+  test(
+    'role selection saves replacement token before role-scoped requests',
+    () async {
+      final preferences = await _mockPreferences();
+      final sessionStore = FakeAuthSessionStore(
+        const AuthSession(token: 'old-token', userId: 2, role: UserRole.unset),
+      );
+      final authRepository = FakeAuthRepository(
+        currentUser: const CurrentUser(
+          userId: 2,
+          phoneMasked: '139****9000',
+          role: UserRole.unset,
+        ),
+      );
+      authRepository.roleSelectionResult = const RoleSelectionResult(
+        role: UserRole.volunteer,
+        token: 'role-token',
+        userId: 2,
+      );
+      final orderRepository = FakeOrderRepository(
+        currentTokenReader: () => sessionStore.session?.token,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          authSessionStoreProvider.overrideWithValue(sessionStore),
+          authRepositoryProvider.overrideWithValue(authRepository),
+          settingsRepositoryProvider.overrideWithValue(
+            FakeSettingsRepository(),
+          ),
+          blindProfileRepositoryProvider.overrideWithValue(
+            FakeBlindProfileRepository(),
+          ),
+          emergencyContactRepositoryProvider.overrideWithValue(
+            FakeEmergencyContactRepository(),
+          ),
+          orderRepositoryProvider.overrideWithValue(orderRepository),
+          volunteerProfileRepositoryProvider.overrideWithValue(
+            FakeVolunteerProfileRepository(),
+          ),
+          appLocationServiceProvider.overrideWithValue(
+            const FakeLocationService(),
+          ),
+          realtimeWebSocketConnectorProvider.overrideWithValue(
+            FakeRealtimeWebSocketConnector(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await _waitForBootstrap(container);
+      await container
+          .read(appStateControllerProvider.notifier)
+          .submitRole(UserRole.volunteer);
+
+      expect(sessionStore.session?.token, 'role-token');
+      expect(orderRepository.listAvailableOrderTokens, contains('role-token'));
+      expect(orderRepository.listMyOrderTokens, contains('role-token'));
+    },
+  );
+
+  test(
+    'login phone validation blocks send-code and verify-code requests',
+    () async {
+      final preferences = await _mockPreferences();
+      final authRepository = FakeAuthRepository(
+        currentUser: const CurrentUser(
+          userId: 1,
+          phoneMasked: '',
+          role: UserRole.unset,
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          authSessionStoreProvider.overrideWithValue(FakeAuthSessionStore()),
+          authRepositoryProvider.overrideWithValue(authRepository),
+          settingsRepositoryProvider.overrideWithValue(
+            FakeSettingsRepository(),
+          ),
+          blindProfileRepositoryProvider.overrideWithValue(
+            FakeBlindProfileRepository(),
+          ),
+          emergencyContactRepositoryProvider.overrideWithValue(
+            FakeEmergencyContactRepository(),
+          ),
+          orderRepositoryProvider.overrideWithValue(FakeOrderRepository()),
+          volunteerProfileRepositoryProvider.overrideWithValue(
+            FakeVolunteerProfileRepository(),
+          ),
+          appLocationServiceProvider.overrideWithValue(
+            const FakeLocationService(),
+          ),
+          realtimeWebSocketConnectorProvider.overrideWithValue(
+            FakeRealtimeWebSocketConnector(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await _waitForBootstrap(container);
+      final controller = container.read(appStateControllerProvider.notifier);
+
+      await expectLater(
+        controller.sendCode('23800138000'),
+        throwsA(isA<ApiFailure>()),
+      );
+      await expectLater(
+        controller.verifyCode('1380013800', '123456'),
+        throwsA(isA<ApiFailure>()),
+      );
+
+      expect(authRepository.sendCodeCalls, 0);
+      expect(
+        container.read(appStateControllerProvider).errorMessage,
+        '请输入 11 位中国大陆手机号，例如 13800138000',
+      );
+    },
+  );
+
+  test(
+    'logout calls backend but clears local session when backend fails',
+    () async {
+      final preferences = await _mockPreferences();
+      final sessionStore = FakeAuthSessionStore(
+        const AuthSession(token: 'token', userId: 1, role: UserRole.blind),
+      );
+      final authRepository = FakeAuthRepository(
+        currentUser: const CurrentUser(
+          userId: 1,
+          phoneMasked: '138****8000',
+          role: UserRole.blind,
+        ),
+        logoutError: const ApiFailure(message: 'network down'),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          authSessionStoreProvider.overrideWithValue(sessionStore),
+          authRepositoryProvider.overrideWithValue(authRepository),
+          settingsRepositoryProvider.overrideWithValue(
+            FakeSettingsRepository(),
+          ),
+          blindProfileRepositoryProvider.overrideWithValue(
+            FakeBlindProfileRepository(),
+          ),
+          emergencyContactRepositoryProvider.overrideWithValue(
+            FakeEmergencyContactRepository(),
+          ),
+          orderRepositoryProvider.overrideWithValue(FakeOrderRepository()),
+          volunteerProfileRepositoryProvider.overrideWithValue(
+            FakeVolunteerProfileRepository(),
+          ),
+          appLocationServiceProvider.overrideWithValue(
+            const FakeLocationService(),
+          ),
+          realtimeWebSocketConnectorProvider.overrideWithValue(
+            FakeRealtimeWebSocketConnector(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await _waitForBootstrap(container);
+      await container.read(appStateControllerProvider.notifier).logout();
+
+      expect(authRepository.logoutCalls, 1);
+      expect(sessionStore.session, isNull);
+      expect(
+        container.read(appStateControllerProvider).isAuthenticated,
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    '401 clears session while 403 preserves it and surfaces message',
+    () async {
+      final preferences = await _mockPreferences();
+
+      Future<({ProviderContainer container, FakeAuthSessionStore sessionStore})>
+      buildContainer(ApiFailure error) async {
+        final sessionStore = FakeAuthSessionStore(
+          const AuthSession(
+            token: 'token',
+            userId: 2,
+            role: UserRole.volunteer,
+          ),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(preferences),
+            authSessionStoreProvider.overrideWithValue(sessionStore),
+            authRepositoryProvider.overrideWithValue(
+              FakeAuthRepository(
+                currentUser: const CurrentUser(
+                  userId: 2,
+                  phoneMasked: '139****9000',
+                  role: UserRole.volunteer,
+                ),
+              ),
+            ),
+            settingsRepositoryProvider.overrideWithValue(
+              FakeSettingsRepository(),
+            ),
+            blindProfileRepositoryProvider.overrideWithValue(
+              FakeBlindProfileRepository(),
+            ),
+            emergencyContactRepositoryProvider.overrideWithValue(
+              FakeEmergencyContactRepository(),
+            ),
+            orderRepositoryProvider.overrideWithValue(
+              FakeOrderRepository(getOrderError: error),
+            ),
+            volunteerProfileRepositoryProvider.overrideWithValue(
+              FakeVolunteerProfileRepository(),
+            ),
+            appLocationServiceProvider.overrideWithValue(
+              const FakeLocationService(),
+            ),
+            realtimeWebSocketConnectorProvider.overrideWithValue(
+              FakeRealtimeWebSocketConnector(),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        await _waitForBootstrap(container);
+        return (container: container, sessionStore: sessionStore);
+      }
+
+      final unauthorized = await buildContainer(
+        const ApiFailure(message: '未认证', httpStatus: 401),
+      );
+      await unauthorized.container
+          .read(appStateControllerProvider.notifier)
+          .refreshOrder('401');
+      expect(unauthorized.sessionStore.session, isNull);
+
+      final forbidden = await buildContainer(
+        const ApiFailure(message: '无权访问', httpStatus: 403),
+      );
+      await forbidden.container
+          .read(appStateControllerProvider.notifier)
+          .refreshOrder('403');
+      expect(forbidden.sessionStore.session, isNotNull);
+      expect(
+        forbidden.container.read(appStateControllerProvider).errorMessage,
+        '无权访问',
+      );
+    },
+  );
 
   test(
     'blind run creation is gated when no emergency contact exists',
@@ -381,6 +635,157 @@ void main() {
     expect(find.text('回到当前位置'), findsOneWidget);
   });
 
+  testWidgets('volunteer dashboard surfaces realtime dispatch opportunities', (
+    tester,
+  ) async {
+    final preferences = await _mockPreferences();
+    final realtimeConnector = FakeRealtimeWebSocketConnector();
+
+    await tester.pumpWidget(
+      _buildApp(
+        preferences: preferences,
+        sessionStore: FakeAuthSessionStore(
+          const AuthSession(
+            token: 'role-token',
+            userId: 2,
+            role: UserRole.volunteer,
+          ),
+        ),
+        authRepository: FakeAuthRepository(
+          currentUser: const CurrentUser(
+            userId: 2,
+            phoneMasked: '139****9000',
+            role: UserRole.volunteer,
+          ),
+        ),
+        orderRepository: FakeOrderRepository(),
+        locationService: const FakeLocationService(),
+        realtimeConnector: realtimeConnector,
+        child: const MaterialApp(home: VolunteerDashboardPage()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(realtimeConnector.connectUris.single.path, '/ws/volunteer');
+    expect(
+      realtimeConnector.connectUris.single.queryParameters['token'],
+      'role-token',
+    );
+
+    realtimeConnector.sockets.single.emit(
+      '{"type":"NEW_ORDER","orderId":501,"startAddress":"朝阳公园南门","distanceKm":2.5,"plannedStart":"2026-04-20T14:00:00","dispatchTimeoutSeconds":30,"priority":"HIGH"}',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('附近需求 (1)'), findsOneWidget);
+    expect(find.text('朝阳公园南门'), findsOneWidget);
+    expect(find.text('响应倒计时 30 秒'), findsOneWidget);
+    expect(find.text('优先级 HIGH'), findsOneWidget);
+    expect(find.text('婉拒'), findsOneWidget);
+    expect(find.text('立即接单'), findsOneWidget);
+  });
+
+  testWidgets('volunteer dashboard shows recoverable websocket failure state', (
+    tester,
+  ) async {
+    final preferences = await _mockPreferences();
+
+    await tester.pumpWidget(
+      _buildApp(
+        preferences: preferences,
+        sessionStore: FakeAuthSessionStore(
+          const AuthSession(
+            token: 'role-token',
+            userId: 2,
+            role: UserRole.volunteer,
+          ),
+        ),
+        authRepository: FakeAuthRepository(
+          currentUser: const CurrentUser(
+            userId: 2,
+            phoneMasked: '139****9000',
+            role: UserRole.volunteer,
+          ),
+        ),
+        orderRepository: FakeOrderRepository(),
+        locationService: const FakeLocationService(),
+        realtimeConnector: FakeRealtimeWebSocketConnector(failConnect: true),
+        child: const MaterialApp(home: VolunteerDashboardPage()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('位置在线 - 实时派单暂不可用'), findsOneWidget);
+    expect(find.textContaining('暂以附近订单刷新作为备用'), findsOneWidget);
+  });
+
+  test(
+    'stale polling does not remove active realtime dispatch state',
+    () async {
+      final preferences = await _mockPreferences();
+      final realtimeConnector = FakeRealtimeWebSocketConnector();
+      final container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          authSessionStoreProvider.overrideWithValue(
+            FakeAuthSessionStore(
+              const AuthSession(
+                token: 'role-token',
+                userId: 2,
+                role: UserRole.volunteer,
+              ),
+            ),
+          ),
+          authRepositoryProvider.overrideWithValue(
+            FakeAuthRepository(
+              currentUser: const CurrentUser(
+                userId: 2,
+                phoneMasked: '139****9000',
+                role: UserRole.volunteer,
+              ),
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            FakeSettingsRepository(),
+          ),
+          blindProfileRepositoryProvider.overrideWithValue(
+            FakeBlindProfileRepository(),
+          ),
+          emergencyContactRepositoryProvider.overrideWithValue(
+            FakeEmergencyContactRepository(),
+          ),
+          orderRepositoryProvider.overrideWithValue(FakeOrderRepository()),
+          volunteerProfileRepositoryProvider.overrideWithValue(
+            FakeVolunteerProfileRepository(),
+          ),
+          appLocationServiceProvider.overrideWithValue(
+            const FakeLocationService(),
+          ),
+          realtimeWebSocketConnectorProvider.overrideWithValue(
+            realtimeConnector,
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await _waitForBootstrap(container);
+      final controller = container.read(appStateControllerProvider.notifier);
+      await controller.startRealtimeDispatch();
+      realtimeConnector.sockets.single.emit(
+        '{"type":"NEW_ORDER","orderId":601,"startAddress":"朝阳公园南门"}',
+      );
+      await Future<void>.delayed(Duration.zero);
+      await controller.refreshVolunteerDashboard();
+
+      final runs = container
+          .read(appStateControllerProvider)
+          .volunteerAvailableRuns;
+      expect(runs.map((run) => run.id), contains('601'));
+      expect(runs.single.isRealtimeDispatch, isTrue);
+    },
+  );
+
   testWidgets('volunteer heartbeat keeps ready state while locating', (
     tester,
   ) async {
@@ -602,6 +1007,7 @@ void main() {
       final result = await controller.acceptRun('301');
 
       expect(result.isConfirmed, isTrue);
+      expect(orderRepository.responseActions, [OrderResponseAction.accept]);
       final confirmedRun = controller.volunteerOwnedRunById('301');
       expect(confirmedRun, isNotNull);
       expect(confirmedRun!.volunteerOwnershipConfirmed, isTrue);
@@ -615,6 +1021,151 @@ void main() {
             .volunteerAvailableRuns
             .where((run) => run.id == '301'),
         isEmpty,
+      );
+    },
+  );
+
+  test(
+    'volunteer decline uses respond and removes dispatch opportunity',
+    () async {
+      final preferences = await _mockPreferences();
+      final orderRepository = FakeOrderRepository(
+        availableRuns: [
+          buildRun(
+            id: '401',
+            location: '朝阳公园南门',
+            status: RunStatus.pendingAccept,
+          ),
+        ],
+      );
+      final container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          authSessionStoreProvider.overrideWithValue(
+            FakeAuthSessionStore(
+              const AuthSession(
+                token: 'token',
+                userId: 2,
+                role: UserRole.volunteer,
+              ),
+            ),
+          ),
+          authRepositoryProvider.overrideWithValue(
+            FakeAuthRepository(
+              currentUser: const CurrentUser(
+                userId: 2,
+                phoneMasked: '139****9000',
+                role: UserRole.volunteer,
+              ),
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            FakeSettingsRepository(),
+          ),
+          blindProfileRepositoryProvider.overrideWithValue(
+            FakeBlindProfileRepository(),
+          ),
+          emergencyContactRepositoryProvider.overrideWithValue(
+            FakeEmergencyContactRepository(),
+          ),
+          orderRepositoryProvider.overrideWithValue(orderRepository),
+          volunteerProfileRepositoryProvider.overrideWithValue(
+            FakeVolunteerProfileRepository(),
+          ),
+          appLocationServiceProvider.overrideWithValue(
+            const FakeLocationService(),
+          ),
+          realtimeWebSocketConnectorProvider.overrideWithValue(
+            FakeRealtimeWebSocketConnector(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await _waitForBootstrap(container);
+      final controller = container.read(appStateControllerProvider.notifier);
+      await controller.refreshVolunteerDashboard();
+      await controller.declineRun('401');
+
+      expect(orderRepository.responseActions, [OrderResponseAction.decline]);
+      expect(
+        container.read(appStateControllerProvider).volunteerAvailableRuns,
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'respond accept remains on dashboard when ownership cannot be confirmed',
+    () async {
+      final preferences = await _mockPreferences();
+      final orderRepository = FakeOrderRepository(
+        availableRuns: [
+          buildRun(
+            id: '402',
+            location: '朝阳公园南门',
+            status: RunStatus.pendingAccept,
+          ),
+        ],
+        confirmAcceptedOrder: false,
+        getOrderError: const ApiFailure(message: '您无权查看此订单', httpStatus: 403),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          authSessionStoreProvider.overrideWithValue(
+            FakeAuthSessionStore(
+              const AuthSession(
+                token: 'token',
+                userId: 2,
+                role: UserRole.volunteer,
+              ),
+            ),
+          ),
+          authRepositoryProvider.overrideWithValue(
+            FakeAuthRepository(
+              currentUser: const CurrentUser(
+                userId: 2,
+                phoneMasked: '139****9000',
+                role: UserRole.volunteer,
+              ),
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            FakeSettingsRepository(),
+          ),
+          blindProfileRepositoryProvider.overrideWithValue(
+            FakeBlindProfileRepository(),
+          ),
+          emergencyContactRepositoryProvider.overrideWithValue(
+            FakeEmergencyContactRepository(),
+          ),
+          orderRepositoryProvider.overrideWithValue(orderRepository),
+          volunteerProfileRepositoryProvider.overrideWithValue(
+            FakeVolunteerProfileRepository(),
+          ),
+          appLocationServiceProvider.overrideWithValue(
+            const FakeLocationService(),
+          ),
+          realtimeWebSocketConnectorProvider.overrideWithValue(
+            FakeRealtimeWebSocketConnector(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await _waitForBootstrap(container);
+      final controller = container.read(appStateControllerProvider.notifier);
+      await controller.refreshVolunteerDashboard();
+
+      final result = await controller.acceptRun('402');
+
+      expect(orderRepository.responseActions, [OrderResponseAction.accept]);
+      expect(result.isConfirmed, isFalse);
+      expect(controller.volunteerOwnedRunById('402'), isNull);
+      expect(
+        container.read(appStateControllerProvider).errorMessage,
+        '您无权查看此订单',
       );
     },
   );
@@ -777,6 +1328,7 @@ Widget _buildApp({
   FakeVolunteerProfileRepository? volunteerProfileRepository,
   FakeSettingsRepository? settingsRepository,
   AppLocationService? locationService,
+  FakeRealtimeWebSocketConnector? realtimeConnector,
   required Widget child,
 }) {
   return ProviderScope(
@@ -812,6 +1364,9 @@ Widget _buildApp({
       ),
       appLocationServiceProvider.overrideWithValue(
         locationService ?? const FakeLocationService(),
+      ),
+      realtimeWebSocketConnectorProvider.overrideWithValue(
+        realtimeConnector ?? FakeRealtimeWebSocketConnector(),
       ),
     ],
     child: child,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:aidrun_demo/app/state/app_state.dart';
 import 'package:aidrun_demo/app/state/app_state_controller.dart';
 import 'package:aidrun_demo/core/network/api_client.dart';
@@ -13,6 +15,7 @@ import 'package:aidrun_demo/core/services/amap_location_service.dart';
 import 'package:aidrun_demo/core/services/blind_accessibility_service.dart';
 import 'package:aidrun_demo/core/services/order_time_resolver.dart';
 import 'package:aidrun_demo/core/services/place_search_service.dart';
+import 'package:aidrun_demo/core/services/realtime_dispatch_service.dart';
 import 'package:aidrun_demo/core/services/speech_recognition_service.dart';
 import 'package:aidrun_demo/core/services/speech_service.dart';
 import 'package:flutter/foundation.dart';
@@ -52,6 +55,23 @@ final apiClientProvider = Provider<ApiClient>(
     sessionStore: ref.watch(authSessionStoreProvider),
   ),
 );
+
+final realtimeWebSocketConnectorProvider = Provider<RealtimeWebSocketConnector>(
+  (ref) => const DartIoRealtimeWebSocketConnector(),
+);
+
+final realtimeDispatchServiceProvider = Provider<RealtimeDispatchService>((
+  ref,
+) {
+  final service = RealtimeDispatchService(
+    baseUrl: ref.watch(apiBaseUrlProvider),
+    connector: ref.watch(realtimeWebSocketConnectorProvider),
+  );
+  ref.onDispose(() {
+    unawaited(service.dispose());
+  });
+  return service;
+});
 
 final authRepositoryProvider = Provider<AuthRepository>(
   (ref) => HttpAuthRepository(ref.watch(apiClientProvider)),

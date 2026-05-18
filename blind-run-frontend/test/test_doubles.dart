@@ -9,6 +9,7 @@ import 'package:aidrun_demo/core/models/place_suggestion.dart';
 import 'package:aidrun_demo/core/models/run.dart';
 import 'package:aidrun_demo/core/models/run_request_input.dart';
 import 'package:aidrun_demo/core/models/run_status.dart';
+import 'package:aidrun_demo/core/models/role_selection_result.dart';
 import 'package:aidrun_demo/core/models/user_role.dart';
 import 'package:aidrun_demo/core/models/volunteer_profile.dart';
 import 'package:aidrun_demo/core/models/app_settings.dart';
@@ -21,6 +22,7 @@ import 'package:aidrun_demo/core/repositories/settings_repository.dart';
 import 'package:aidrun_demo/core/repositories/volunteer_profile_repository.dart';
 import 'package:aidrun_demo/core/services/amap_location_service.dart';
 import 'package:aidrun_demo/core/services/place_search_service.dart';
+import 'package:aidrun_demo/core/services/realtime_dispatch_service.dart';
 import 'package:aidrun_demo/core/services/speech_recognition_service.dart';
 import 'package:aidrun_demo/core/services/speech_service.dart';
 
@@ -44,18 +46,24 @@ class FakeAuthSessionStore implements AuthSessionStore {
 }
 
 class FakeAuthRepository implements AuthRepository {
-  FakeAuthRepository({required this.currentUser, AuthSession? verifySession})
-    : verifySession =
-          verifySession ??
-          AuthSession(
-            token: 'token',
-            userId: currentUser.userId,
-            role: currentUser.role,
-          );
+  FakeAuthRepository({
+    required this.currentUser,
+    AuthSession? verifySession,
+    this.logoutError,
+  }) : verifySession =
+           verifySession ??
+           AuthSession(
+             token: 'token',
+             userId: currentUser.userId,
+             role: currentUser.role,
+           );
 
   CurrentUser currentUser;
   AuthSession verifySession;
+  final Exception? logoutError;
   int sendCodeCalls = 0;
+  int logoutCalls = 0;
+  RoleSelectionResult? roleSelectionResult;
 
   @override
   Future<CurrentUser> getCurrentUser() async => currentUser;
@@ -66,7 +74,7 @@ class FakeAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<UserRole> setRole(UserRole role) async {
+  Future<RoleSelectionResult> setRole(UserRole role) async {
     currentUser = CurrentUser(
       userId: currentUser.userId,
       phoneMasked: currentUser.phoneMasked,
@@ -74,12 +82,20 @@ class FakeAuthRepository implements AuthRepository {
       createdAt: currentUser.createdAt,
     );
     verifySession = verifySession.copyWith(role: role);
-    return role;
+    return roleSelectionResult ?? RoleSelectionResult(role: role);
   }
 
   @override
   Future<AuthSession> verifyCode(String phone, String code) async =>
       verifySession;
+
+  @override
+  Future<void> logout() async {
+    logoutCalls += 1;
+    if (logoutError != null) {
+      throw logoutError!;
+    }
+  }
 }
 
 class FakeSettingsRepository implements SettingsRepository {
@@ -244,8 +260,12 @@ class FakeOrderRepository implements OrderRepository {
     List<Run>? volunteerRuns,
     this.acceptError,
     this.getOrderError,
+    this.listMyOrdersError,
+    this.listAvailableOrdersError,
     this.acceptedVolunteerStatus = RunStatus.inProgress,
     this.stripVolunteerContextOnOwnedReads = false,
+    this.confirmAcceptedOrder = true,
+    this.currentTokenReader,
   }) : blindRuns = blindRuns ?? <Run>[],
        availableRuns = availableRuns ?? <Run>[],
        volunteerRuns = volunteerRuns ?? <Run>[];
@@ -255,11 +275,18 @@ class FakeOrderRepository implements OrderRepository {
   final List<Run> volunteerRuns;
   final Exception? acceptError;
   final Exception? getOrderError;
+  final Exception? listMyOrdersError;
+  final Exception? listAvailableOrdersError;
   final RunStatus acceptedVolunteerStatus;
   final bool stripVolunteerContextOnOwnedReads;
+  final bool confirmAcceptedOrder;
+  final String? Function()? currentTokenReader;
   final Map<String, OrderReview> reviews = <String, OrderReview>{};
   int createOrderCalls = 0;
   int listMyOrdersCalls = 0;
+  final List<OrderResponseAction> responseActions = <OrderResponseAction>[];
+  final List<String?> listAvailableOrderTokens = <String?>[];
+  final List<String?> listMyOrderTokens = <String?>[];
 
   @override
   Future<void> acceptOrder(String orderId) async {
@@ -268,13 +295,28 @@ class FakeOrderRepository implements OrderRepository {
     }
     _replaceStatus(availableRuns, orderId, RunStatus.inProgress);
     final run = availableRuns.firstWhere((item) => item.id == orderId);
-    volunteerRuns.add(
-      _stripVolunteerContext(run).copyWith(
-        status: acceptedVolunteerStatus,
-        volunteerOwnershipConfirmed: true,
-      ),
-    );
+    if (confirmAcceptedOrder) {
+      volunteerRuns.add(
+        _stripVolunteerContext(run).copyWith(
+          status: acceptedVolunteerStatus,
+          volunteerOwnershipConfirmed: true,
+        ),
+      );
+    }
     availableRuns.removeWhere((item) => item.id == orderId);
+  }
+
+  @override
+  Future<void> respondToOrder(
+    String orderId,
+    OrderResponseAction action,
+  ) async {
+    responseActions.add(action);
+    if (action == OrderResponseAction.decline) {
+      availableRuns.removeWhere((item) => item.id == orderId);
+      return;
+    }
+    await acceptOrder(orderId);
   }
 
   @override
@@ -339,12 +381,21 @@ class FakeOrderRepository implements OrderRepository {
   Future<OrderReview?> getReview(String orderId) async => reviews[orderId];
 
   @override
-  Future<List<Run>> listAvailableOrders() async =>
-      List<Run>.from(availableRuns);
+  Future<List<Run>> listAvailableOrders() async {
+    listAvailableOrderTokens.add(currentTokenReader?.call());
+    if (listAvailableOrdersError != null) {
+      throw listAvailableOrdersError!;
+    }
+    return List<Run>.from(availableRuns);
+  }
 
   @override
   Future<List<Run>> listMyOrders(UserRole role) async {
     listMyOrdersCalls += 1;
+    listMyOrderTokens.add(currentTokenReader?.call());
+    if (listMyOrdersError != null) {
+      throw listMyOrdersError!;
+    }
     if (role == UserRole.blind) {
       return List<Run>.from(blindRuns);
     }
@@ -410,13 +461,54 @@ class FakeLocationService implements AppLocationService {
   final DeviceLocationFailureReason? failureReason;
 
   @override
-  Future<DeviceLocationLookup> locate() async => DeviceLocationLookup(
-    location: location,
-    failureReason: failureReason,
-  );
+  Future<DeviceLocationLookup> locate() async =>
+      DeviceLocationLookup(location: location, failureReason: failureReason);
 
   @override
   Future<DeviceLocation?> locateOnce() async => location;
+}
+
+class FakeRealtimeWebSocketConnector implements RealtimeWebSocketConnector {
+  FakeRealtimeWebSocketConnector({this.failConnect = false});
+
+  final bool failConnect;
+  final List<Uri> connectUris = <Uri>[];
+  final List<FakeRealtimeWebSocket> sockets = <FakeRealtimeWebSocket>[];
+
+  @override
+  Future<RealtimeWebSocket> connect(Uri uri) async {
+    connectUris.add(uri);
+    if (failConnect) {
+      throw Exception('websocket unavailable');
+    }
+    final socket = FakeRealtimeWebSocket();
+    sockets.add(socket);
+    return socket;
+  }
+}
+
+class FakeRealtimeWebSocket implements RealtimeWebSocket {
+  final StreamController<dynamic> _incoming = StreamController<dynamic>();
+  final List<String> sentMessages = <String>[];
+  bool closed = false;
+
+  @override
+  Stream<dynamic> get stream => _incoming.stream;
+
+  @override
+  void add(String data) {
+    sentMessages.add(data);
+  }
+
+  void emit(dynamic message) {
+    _incoming.add(message);
+  }
+
+  @override
+  Future<void> close() async {
+    closed = true;
+    await _incoming.close();
+  }
 }
 
 class SequencedFakeLocationService implements AppLocationService {

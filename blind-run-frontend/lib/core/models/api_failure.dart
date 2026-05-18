@@ -12,6 +12,7 @@ class ApiFailure implements Exception {
   final String rawBody;
 
   bool get isUnauthorized => httpStatus == 401;
+  bool get isForbidden => httpStatus == 403;
 
   @override
   String toString() {

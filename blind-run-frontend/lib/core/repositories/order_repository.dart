@@ -25,12 +25,22 @@ class CreateOrderPayload {
   final String notes;
 }
 
+enum OrderResponseAction { accept, decline }
+
+extension OrderResponseActionX on OrderResponseAction {
+  String get backendValue => switch (this) {
+    OrderResponseAction.accept => 'ACCEPT',
+    OrderResponseAction.decline => 'DECLINE',
+  };
+}
+
 abstract class OrderRepository {
   Future<Run> createOrder(CreateOrderPayload payload);
   Future<Run> getOrder(String orderId);
   Future<List<Run>> listMyOrders(UserRole role);
   Future<List<Run>> listAvailableOrders();
   Future<void> cancelOrder(String orderId);
+  Future<void> respondToOrder(String orderId, OrderResponseAction action);
   Future<void> acceptOrder(String orderId);
   Future<void> markEnRoute(String orderId);
   Future<void> markArrived(String orderId);
@@ -46,20 +56,26 @@ class HttpOrderRepository implements OrderRepository {
 
   @override
   Future<Run> createOrder(CreateOrderPayload payload) async {
-    final response = await _apiClient.post('/api/orders', body: {
-      'startLatitude': payload.startLatitude,
-      'startLongitude': payload.startLongitude,
-      'startAddress': payload.startAddress,
-      'plannedStartTime': payload.plannedStartTime.toIso8601String(),
-      'plannedEndTime': payload.plannedEndTime.toIso8601String(),
-    }) as Map<String, dynamic>;
+    final response =
+        await _apiClient.post(
+              '/api/orders',
+              body: {
+                'startLatitude': payload.startLatitude,
+                'startLongitude': payload.startLongitude,
+                'startAddress': payload.startAddress,
+                'plannedStartTime': payload.plannedStartTime.toIso8601String(),
+                'plannedEndTime': payload.plannedEndTime.toIso8601String(),
+              },
+            )
+            as Map<String, dynamic>;
     return Run(
       id: '${response['id']}',
       blindRunnerId: '',
       location: payload.startAddress,
       address: payload.startAddress,
       timeLabel: payload.timeLabel,
-      status: RunStatusX.fromBackend(response['status'] as String?) ??
+      status:
+          RunStatusX.fromBackend(response['status'] as String?) ??
           RunStatus.pendingMatch,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
@@ -73,20 +89,23 @@ class HttpOrderRepository implements OrderRepository {
 
   @override
   Future<Run> getOrder(String orderId) async {
-    final response = await _apiClient.get('/api/orders/$orderId') as Map<String, dynamic>;
+    final response =
+        await _apiClient.get('/api/orders/$orderId') as Map<String, dynamic>;
     return _parseOrderDetail(response);
   }
 
   @override
   Future<List<Run>> listMyOrders(UserRole role) async {
-    final response = await _apiClient.get(
-      '/api/orders/mine',
-      queryParameters: {
-        'role': role.backendValue,
-        'page': '0',
-        'size': '20',
-      },
-    ) as Map<String, dynamic>;
+    final response =
+        await _apiClient.get(
+              '/api/orders/mine',
+              queryParameters: {
+                'role': role.backendValue,
+                'page': '0',
+                'size': '20',
+              },
+            )
+            as Map<String, dynamic>;
     final content = response['content'];
     if (content is! List) {
       return const [];
@@ -121,6 +140,17 @@ class HttpOrderRepository implements OrderRepository {
   }
 
   @override
+  Future<void> respondToOrder(
+    String orderId,
+    OrderResponseAction action,
+  ) async {
+    await _apiClient.post(
+      '/api/orders/$orderId/respond',
+      body: {'action': action.backendValue},
+    );
+  }
+
+  @override
   Future<void> acceptOrder(String orderId) async {
     await _apiClient.post('/api/orders/$orderId/accept');
   }
@@ -141,11 +171,15 @@ class HttpOrderRepository implements OrderRepository {
   }
 
   @override
-  Future<void> createReview(String orderId, int rating, {String comment = ''}) async {
-    await _apiClient.post('/api/orders/$orderId/review', body: {
-      'rating': rating,
-      'comment': comment,
-    });
+  Future<void> createReview(
+    String orderId,
+    int rating, {
+    String comment = '',
+  }) async {
+    await _apiClient.post(
+      '/api/orders/$orderId/review',
+      body: {'rating': rating, 'comment': comment},
+    );
   }
 
   @override
@@ -181,10 +215,12 @@ class HttpOrderRepository implements OrderRepository {
       location: json['startAddress'] as String? ?? '',
       address: json['startAddress'] as String? ?? '',
       timeLabel: Run.formatTimeLabel(plannedStart, plannedEnd),
-      status: RunStatusX.fromBackend(json['status'] as String?) ??
+      status:
+          RunStatusX.fromBackend(json['status'] as String?) ??
           RunStatus.pendingMatch,
       createdAt: _parseDateTime(json['createdAt']) ?? DateTime.now(),
-      updatedAt: _parseDateTime(json['updatedAt']) ??
+      updatedAt:
+          _parseDateTime(json['updatedAt']) ??
           _parseDateTime(json['acceptedAt']) ??
           _parseDateTime(json['createdAt']) ??
           DateTime.now(),

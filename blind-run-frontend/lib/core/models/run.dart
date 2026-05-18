@@ -24,6 +24,9 @@ class Run {
     this.volunteerPhone,
     this.blindUserPhone,
     this.volunteerOwnershipConfirmed = false,
+    this.dispatchTimeoutSeconds,
+    this.dispatchPriority,
+    this.isRealtimeDispatch = false,
   });
 
   final String id;
@@ -46,6 +49,9 @@ class Run {
   final String? volunteerPhone;
   final String? blindUserPhone;
   final bool volunteerOwnershipConfirmed;
+  final int? dispatchTimeoutSeconds;
+  final String? dispatchPriority;
+  final bool isRealtimeDispatch;
 
   Run copyWith({
     String? id,
@@ -70,6 +76,9 @@ class Run {
     String? volunteerPhone,
     String? blindUserPhone,
     bool? volunteerOwnershipConfirmed,
+    int? dispatchTimeoutSeconds,
+    String? dispatchPriority,
+    bool? isRealtimeDispatch,
   }) {
     return Run(
       id: id ?? this.id,
@@ -93,6 +102,10 @@ class Run {
       blindUserPhone: blindUserPhone ?? this.blindUserPhone,
       volunteerOwnershipConfirmed:
           volunteerOwnershipConfirmed ?? this.volunteerOwnershipConfirmed,
+      dispatchTimeoutSeconds:
+          dispatchTimeoutSeconds ?? this.dispatchTimeoutSeconds,
+      dispatchPriority: dispatchPriority ?? this.dispatchPriority,
+      isRealtimeDispatch: isRealtimeDispatch ?? this.isRealtimeDispatch,
     );
   }
 
@@ -116,6 +129,13 @@ class Run {
       blindUserPhone: _preferNonEmpty(blindUserPhone, fallback.blindUserPhone),
       volunteerOwnershipConfirmed:
           volunteerOwnershipConfirmed || fallback.volunteerOwnershipConfirmed,
+      dispatchTimeoutSeconds:
+          dispatchTimeoutSeconds ?? fallback.dispatchTimeoutSeconds,
+      dispatchPriority: _preferNonEmpty(
+        dispatchPriority,
+        fallback.dispatchPriority,
+      ),
+      isRealtimeDispatch: isRealtimeDispatch || fallback.isRealtimeDispatch,
     );
   }
 
@@ -133,11 +153,13 @@ class Run {
       return '';
     }
     final now = DateTime.now();
-    final sameDay = start.year == now.year &&
+    final sameDay =
+        start.year == now.year &&
         start.month == now.month &&
         start.day == now.day;
     final tomorrow = now.add(const Duration(days: 1));
-    final isTomorrow = start.year == tomorrow.year &&
+    final isTomorrow =
+        start.year == tomorrow.year &&
         start.month == tomorrow.month &&
         start.day == tomorrow.day;
     final startText = _hhmm(start);
@@ -145,9 +167,11 @@ class Run {
     final prefix = sameDay
         ? '今天'
         : isTomorrow
-            ? '明天'
-            : '${start.month}月${start.day}日';
-    return endText == null ? '$prefix $startText' : '$prefix $startText-$endText';
+        ? '明天'
+        : '${start.month}月${start.day}日';
+    return endText == null
+        ? '$prefix $startText'
+        : '$prefix $startText-$endText';
   }
 
   static String _hhmm(DateTime value) {
